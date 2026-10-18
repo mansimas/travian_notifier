@@ -2,9 +2,9 @@
  * NotifierService
  *
  * The watch loop: every few minutes TravianService.read(), and one phone call when any village
- * has more incoming attacks than at the last check - unless the last alarm was less than
- * callCooldownHours ago, then the attack is only logged. What the last check saw and when the
- * last alarm rang are kept in .tmp/state.json, so a restart does not ring again.
+ * has more incoming attacks than at the last check - unless it is quiet time, then the attack is
+ * only logged. Quiet time follows every alarm for callCooldownHours, or is set by /mute. What the
+ * last check saw and when quiet time ends are kept in .tmp/state.json, so a restart keeps both.
  *
  * When checks keep failing (login refused, page changed) the player gets one Telegram text -
  * never a call, a broken notifier must not wake anybody.
@@ -13,6 +13,7 @@ const fs = require('fs');
 const path = require('path');
 
 const STATE_FILE = path.join(process.cwd(), '.tmp', 'state.json');
+const HOUR = 60 * 60 * 1000;
 
 let state = {};
 let lastCheck = null; // { at, ok, error?, villages?, active?, movements? } for /status
@@ -40,9 +41,8 @@ async function check() {
     if (movements && movements.inSeconds != null && fresh.includes(active)) {
       text += ' First attack on ' + active + ' arrives in ' + Math.round(movements.inSeconds / 60) + ' minutes.';
     }
-    const quietUntil = (state.alarmAt || 0) + sails.config.travian.callCooldownHours * 60 * 60 * 1000;
-    if (Date.now() < quietUntil) {
-      sails.log.warn(text + ' (no call, quiet until ' + new Date(quietUntil).toISOString() + ')');
+    if (Date.now() < (state.quietUntil || 0)) {
+      sails.log.warn(text + ' (no call, quiet until ' + new Date(state.quietUntil).toISOString() + ')');
     } else {
       sails.log.warn(text);
       // A call that does not go through must still reach the phone somehow: as a text.
@@ -51,6 +51,7 @@ async function check() {
         return PhoneService.message(text + ' (The call failed: ' + e.message + ')');
       });
       state.alarmAt = Date.now();
+      state.quietUntil = state.alarmAt + sails.config.travian.callCooldownHours * HOUR;
     }
   }
   state.counts = Object.fromEntries(villages.map(v => [v.id, v.attacks]));
@@ -99,16 +100,16 @@ module.exports = {
     loop();
   },
 
-  // Starts the quiet time now, as if an alarm had just rung: no call for callCooldownHours.
-  mute: function () {
-    state.alarmAt = Date.now();
+  // Starts the quiet time now: no call for the next hours (callCooldownHours if not given).
+  mute: function (hours = sails.config.travian.callCooldownHours) {
+    state.quietUntil = Date.now() + hours * HOUR;
     writeState();
-    sails.log.info('travian notifier: muted');
+    sails.log.info('travian notifier: muted for ' + hours + ' hours');
   },
 
   // Ends the quiet time after an alarm now, so the next new attack rings again.
   unmute: function () {
-    delete state.alarmAt;
+    delete state.quietUntil;
     writeState();
     sails.log.info('travian notifier: unmuted');
   },
@@ -117,7 +118,7 @@ module.exports = {
     return {
       lastCheck,
       alarmAt: state.alarmAt ? new Date(state.alarmAt).toISOString() : null,
-      quietUntil: state.alarmAt ? new Date(state.alarmAt + sails.config.travian.callCooldownHours * 60 * 60 * 1000).toISOString() : null,
+      quietUntil: Date.now() < (state.quietUntil || 0) ? new Date(state.quietUntil).toISOString() : null,
       problemSentAt: state.problemSentAt || null,
     };
   },
