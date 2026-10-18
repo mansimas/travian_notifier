@@ -8,7 +8,6 @@ It runs on a server, so your PC can be off. Every 3–5 minutes it logs in to yo
 
 Each new attack gives one call, made by [CallMeBot](https://www.callmebot.com/blog/telegram-phone-call-using-api/). A voice reads out which villages are attacked and when the first attack lands. If the notifier stops working (login refused, page changed), you get a Telegram text message instead of a call, at most once every 6 hours.
 
-No npm packages are needed. It runs on Node 16 or newer.
 
 ## 1. Telegram + CallMeBot (one time)
 
@@ -23,25 +22,29 @@ Telegram calls ring like phone calls, but Sleep mode blocks them unless you let 
 - Keep the **ring/silent switch on ring**. In silent mode a call only vibrates.
 - Test it for real: turn Sleep Focus on, lock the phone and run `npm run test-call` (step 3).
 
-## 3. Server
+## 3. Server (first time)
+
+A Sails app like the games: pm2 app `TravianNotifier`, port 1421 on loopback only (no nginx).
 
 ```bash
-git clone https://github.com/mansimas/travian_notifier.git ~/travian_notifier
-cd ~/travian_notifier
-cp .env.example .env && nano .env      # world, username, password, @telegram
-chmod 600 .env
+git clone git@github.com:mansimas/travian_notifier.git ~/travian_notifier
+cd ~/travian_notifier && npm install
+cp .env.example .env && nano .env && chmod 600 .env   # world, username, password, @telegram
 npm run check       # logs in once, lists your villages and attacks, saves dorf1.html
 npm run test-call   # your phone should ring
 pm2 start ecosystem.config.js && pm2 save
-pm2 logs TravianNotifier
 ```
 
-The pm2 app is called `TravianNotifier`. The games' deploys reload only their own apps by name, so they don't touch it.
+After that, deploy from your machine with `deploy` inside `~/travian_notifier`, as with the games. It runs `git pull` and then `rr`, which is `npm run restart` = `pm2 reload TravianNotifier`. If `package.json` dependencies change, run `npm install` on the server once.
 
-Update later with `git pull && pm2 restart TravianNotifier`.
+On the server:
+- `curl -s localhost:1421/status` shows what the last check saw.
+- `pm2 logs TravianNotifier` shows the log.
+
+Locally, `node app.js` lifts without watching. Use `WATCH=1 node app.js` to watch for real.
 
 ## Notes
 
 - `npm run check` prints `UNDER ATTACK` next to attacked villages. The first time you have a real incoming attack, run it and confirm that the right village is flagged. If nothing is flagged, keep the saved `dorf1.html`: it shows how the game marks the attack.
 - The account is logged in from the server's IP while you play from home. Travian allows this (it is what phones do), but it is still your account and your risk. Automation that *plays* is against the rules; this only reads one page.
-- `.env`, `state.json` and `dorf1.html` stay on the server and are never committed.
+- `.env`, `.tmp/state.json` (what the last check saw, so a restart does not ring again) and `dorf1.html` stay on the server and are never committed.

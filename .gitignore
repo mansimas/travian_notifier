@@ -1,4 +1,6 @@
 .env
-state.json
+.tmp
 dorf1.html
-node_modules/
+logs
+node_modules
+package-lock.json

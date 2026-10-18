@@ -1,0 +1,15 @@
+{
+  "generators": {
+    "modules": {}
+  },
+  "hooks": {
+    "grunt": false,
+    "orm": false,
+    "pubsub": false,
+    "sockets": false,
+    "session": false,
+    "views": false,
+    "i18n": false,
+    "blueprints": false
+  }
+}

@@ -1,13 +1,23 @@
 {
   "name": "travian_notifier",
+  "private": true,
   "version": "1.0.0",
   "description": "Rings your phone (free Telegram call) when a Travian village gets an incoming attack",
-  "main": "notifier.js",
-  "private": true,
-  "engines": { "node": ">=16" },
+  "main": "app.js",
   "scripts": {
-    "start": "node notifier.js",
-    "check": "node notifier.js --check",
-    "test-call": "node notifier.js --test-call"
+    "start": "git pull origin main && npm install && pm2 startOrReload ecosystem.config.js && pm2 logs TravianNotifier",
+    "restart": "pm2 reload TravianNotifier",
+    "check": "node scripts/run.js check",
+    "test-call": "node scripts/run.js test-call"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/mansimas/travian_notifier.git"
+  },
+  "author": "mantas",
+  "license": "",
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "sails": "^1.5.8"
   }
 }
