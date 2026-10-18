@@ -2,9 +2,7 @@
 
 Rings your iPhone with a free Telegram call when one of your Travian villages gets an incoming attack.
 
-It runs on a server, so your PC can be off. Every 3–5 minutes it logs in to your account and reads `dorf1.php`, the same page the game shows you. Two things count as a new attack:
-- a village that was not under attack before shows the red swords in the village list;
-- the active village shows more incoming attacks than at the last check.
+It runs on a server, so your PC can be off. Every 3–5 minutes it logs in to your account and reads `dorf1.php`, the same page the game shows you. The page carries the game's own count of incoming attacks for every village (`incomingAttacksAmount`). A village whose count went up since the last check means a new attack.
 
 Each new attack gives one call, made by [CallMeBot](https://www.callmebot.com/blog/telegram-phone-call-using-api/). A voice reads out which villages are attacked and when the first attack lands. If the notifier stops working (login refused, page changed), you get a Telegram text message instead of a call, at most once every 6 hours.
 
@@ -45,6 +43,6 @@ Locally, `node app.js` lifts without watching. Use `WATCH=1 node app.js` to watc
 
 ## Notes
 
-- `npm run check` prints `UNDER ATTACK` next to attacked villages. The first time you have a real incoming attack, run it and confirm that the right village is flagged. If nothing is flagged, keep the saved `dorf1.html`: it shows how the game marks the attack.
+- `npm run check` prints the incoming attack count of every village. Run it once while a real attack is coming, to confirm the count shows it.
 - The account is logged in from the server's IP while you play from home. Travian allows this (it is what phones do), but it is still your account and your risk. Automation that *plays* is against the rules; this only reads one page.
 - `.env`, `.tmp/state.json` (what the last check saw, so a restart does not ring again) and `dorf1.html` stay on the server and are never committed.

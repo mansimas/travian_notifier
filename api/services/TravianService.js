@@ -88,19 +88,39 @@ async function loadDorf1() {
   return res.body;
 }
 
-// Villages from the sidebar list, each { id, name, attacked }. The game marks a village under
-// attack with an "attack" class (the red swords icon).
-function parseVillages(html) {
-  const villages = [];
-  const parts = html.split(/<div[^>]*class="[^"]*\blistEntry\b/).slice(1);
-  for (const entry of parts) {
-    const classes = (entry.match(/^([^"]*)"/) || [, ''])[1]; // the rest of the listEntry class list
-    const id = (entry.match(/data-did="(\d+)"/) || entry.match(/newdid=(\d+)/) || [])[1];
-    const name = decode((entry.match(/class="name"[^>]*>([^<]*)</) || [, '?'])[1]);
-    const attacked = /\battack\b/.test(classes) || /<[^>]*class="[^"]*\battack\b/.test(entry);
-    if (id || name !== '?') villages.push({ id: id || name, name, attacked });
+// The game data dorf1.php hands its React village list: { ownPlayer: { village, villageList } }.
+// Read from the page, not the sidebar HTML - every sidebar entry carries the red swords icon, the
+// game only shows or hides it with this data.
+function parseViewData(html) {
+  const at = html.indexOf('VillageBoxes.render(');
+  const key = at < 0 ? -1 : html.indexOf('viewData:', at);
+  const start = key < 0 ? -1 : html.indexOf('{', key);
+  if (start < 0) return null;
+  try { return JSON.parse(html.slice(start, jsonEnd(html, start))); } catch (e) { return null; }
+}
+
+// Index just past the JSON object starting at text[start] ("{").
+function jsonEnd(text, start) {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === '\\') i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) return i + 1;
   }
-  return villages;
+  return text.length;
+}
+
+// Every village, each { id, name, attacks } (incoming attacks right now). Villages sorted into
+// village list groups sit one level deeper.
+function parseVillages(viewData) {
+  const list = (viewData && viewData.ownPlayer && viewData.ownPlayer.villageList) || [];
+  return list.flatMap(entry => entry.villages || [entry])
+    .map(v => ({ id: String(v.id), name: v.name, attacks: v.incomingAttacksAmount || 0 }));
 }
 
 // Incoming attacks on the active village from the troop movements box: { count, inSeconds }
@@ -109,16 +129,11 @@ function parseMovements(html) {
   const start = html.indexOf('id="movements"');
   if (start < 0) return null;
   const box = html.slice(start, html.indexOf('</table>', start));
-  const row = box.split('<tr').find(r => /class="att1"|class="a1"/.test(r));
+  const row = box.split('<tr').find(r => /class="att1"/.test(r)); // def1 rows are reinforcements
   if (!row) return null;
   const count = Number((decode(row).match(/class="a1"[^>]*>\s*(\d+)/) || [, 1])[1]);
   const timer = (row.match(/class="timer"[^>]*value="(\d+)"/) || row.match(/value="(\d+)"[^>]*class="timer"/) || [])[1];
   return { count, inSeconds: timer ? Number(timer) : null };
-}
-
-function activeVillageName(html) {
-  const m = html.match(/class="listEntry[^"]*\bactive\b[^]*?class="name"[^>]*>([^<]*)</) || html.match(/<input[^>]*id="villageName"[^>]*value="([^"]*)"/);
-  return m ? decode(m[1]) : null;
 }
 
 function decode(s) {
@@ -126,12 +141,15 @@ function decode(s) {
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n)).trim();
 }
 
-// Everything one look at dorf1.php tells: { html, villages, active, movements }.
+// Everything one look at dorf1.php tells: { html, villages, active, movements }. movements is
+// only the active village's (dorf1.php shows no others), used for the arrival time.
 async function read() {
   const html = await loadDorf1();
-  const villages = parseVillages(html);
+  const viewData = parseViewData(html);
+  const villages = parseVillages(viewData);
   if (!villages.length) throw new Problem('page', 'No villages found on dorf1.php, the page layout may have changed. Run npm run check.');
-  return { html, villages, active: activeVillageName(html), movements: parseMovements(html) };
+  const active = viewData.ownPlayer.village ? viewData.ownPlayer.village.name : null;
+  return { html, villages, active, movements: parseMovements(html) };
 }
 
-module.exports = { Problem, request, read, parseVillages, parseMovements, activeVillageName };
+module.exports = { Problem, request, read, parseViewData, parseVillages, parseMovements };

@@ -18,7 +18,7 @@ const commands = {
     fs.writeFileSync('dorf1.html', html);
     console.log('active village:', active);
     console.log('villages:');
-    for (const v of villages) console.log('  ' + (v.attacked ? 'UNDER ATTACK ' : '             ') + v.name + ' (' + v.id + ')');
+    for (const v of villages) console.log('  ' + v.name + ' (' + v.id + '): ' + v.attacks + ' incoming attacks');
     console.log('incoming attacks on active village:', movements || 'none');
     console.log('page saved to dorf1.html');
   },

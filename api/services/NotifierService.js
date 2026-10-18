@@ -1,10 +1,9 @@
 /**
  * NotifierService
  *
- * The watch loop: every few minutes TravianService.read(), and one phone call per NEW attack.
- * A new attack is a village that was not under attack at the last check, or more attacks on the
- * active village than last time. What the last check saw is kept in .tmp/state.json, so a
- * restart does not ring again for an attack already called.
+ * The watch loop: every few minutes TravianService.read(), and one phone call when any village
+ * has more incoming attacks than at the last check. What the last check saw is kept in
+ * .tmp/state.json, so a restart does not ring again for an attack already called.
  *
  * When checks keep failing (login refused, page changed) the player gets one Telegram text -
  * never a call, a broken notifier must not wake anybody.
@@ -26,17 +25,15 @@ function writeState() {
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 }
 
-function newAttacks(before, villages, active, movements) {
-  const attacked = new Set(before.attacked || []);
-  const fresh = villages.filter(v => v.attacked && !attacked.has(v.id)).map(v => v.name);
-  const count = movements ? movements.count : 0;
-  if (active && count > ((before.activeCounts || {})[active] || 0) && !fresh.includes(active)) fresh.push(active);
-  return fresh;
+// Names of the villages with more incoming attacks than at the last check.
+function newAttacks(before, villages) {
+  const counts = before.counts || {};
+  return villages.filter(v => v.attacks > (counts[v.id] || 0)).map(v => v.name);
 }
 
 async function check() {
   const { villages, active, movements } = await TravianService.read();
-  const fresh = newAttacks(state, villages, active, movements);
+  const fresh = newAttacks(state, villages);
   if (fresh.length) {
     let text = 'Travian alarm. ' + fresh.join(', ') + ' under attack.';
     if (movements && movements.inSeconds != null && fresh.includes(active)) {
@@ -45,8 +42,7 @@ async function check() {
     sails.log.warn(text);
     await PhoneService.call(text);
   }
-  state.attacked = villages.filter(v => v.attacked).map(v => v.id);
-  state.activeCounts = active ? { [active]: movements ? movements.count : 0 } : {};
+  state.counts = Object.fromEntries(villages.map(v => [v.id, v.attacks]));
   writeState();
   lastCheck = { at: new Date().toISOString(), ok: true, villages, active, movements };
 }
@@ -93,7 +89,7 @@ module.exports = {
   },
 
   status: function () {
-    return { lastCheck, attacked: state.attacked || [], problemSentAt: state.problemSentAt || null };
+    return { lastCheck, problemSentAt: state.problemSentAt || null };
   },
 
   newAttacks,
