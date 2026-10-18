@@ -40,7 +40,11 @@ async function check() {
       text += ' First attack on ' + active + ' arrives in ' + Math.round(movements.inSeconds / 60) + ' minutes.';
     }
     sails.log.warn(text);
-    await PhoneService.call(text);
+    // A call that does not go through must still reach the phone somehow: as a text.
+    await PhoneService.call(text).catch(e => {
+      sails.log.error(e.message);
+      return PhoneService.message(text + ' (The call failed: ' + e.message + ')');
+    });
   }
   state.counts = Object.fromEntries(villages.map(v => [v.id, v.attacks]));
   writeState();
