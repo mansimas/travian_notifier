@@ -13,7 +13,7 @@ function callMeBot(endpoint, text, extra = '') {
     const answer = res.body.replace(/<script[^]*?<\/script>/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     sails.log.info('CallMeBot ' + endpoint + ': ' + answer.slice(0, 500));
     // A refused call still comes back HTTP 200, with "Error: ..." in the text.
-    const error = answer.match(/Error:\s*(.*?)(?: Please see the FAQ| End\.|$)/);
+    const error = answer.match(/Error:\s*(.*?)(?: Please see the FAQ| End\.|$)/i);
     if (error) throw new Error('CallMeBot ' + endpoint + ' refused: ' + error[1]);
     return answer;
   });
