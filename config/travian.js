@@ -17,7 +17,7 @@ module.exports.travian = {
   // callGapSeconds apart (CallMeBot refuses two calls to one user within 65 seconds; a second
   // call within 3 minutes also passes the iPhone's "repeated calls" exception in Sleep Focus).
   // Each call reads the text callRepeat times.
-  callCount: Number(process.env.CALL_COUNT || 3),
+  callCount: Number(process.env.CALL_COUNT || 1),
   callGapSeconds: Number(process.env.CALL_GAP_SECONDS || 70),
   callRepeat: Number(process.env.CALL_REPEAT || 3),
 

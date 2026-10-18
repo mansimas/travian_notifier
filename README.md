@@ -4,7 +4,7 @@ Rings your iPhone with a free Telegram call when one of your Travian villages ge
 
 It runs on a server, so your PC can be off. Every 3–5 minutes it logs in to your account and reads `dorf1.php`, the same page the game shows you. The page carries the game's own count of incoming attacks for every village (`incomingAttacksAmount`). A village whose count went up since the last check means a new attack.
 
-Each new attack rings a few calls in a row, made by [CallMeBot](https://www.callmebot.com/blog/telegram-phone-call-using-api/). A voice reads out which villages are attacked and when the first attack lands. If the notifier stops working (login refused, page changed), you get a Telegram text message instead of a call, at most once every 6 hours.
+Each new attack gives one call (more with `CALL_COUNT`), made by [CallMeBot](https://www.callmebot.com/blog/telegram-phone-call-using-api/). A voice reads out which villages are attacked and when the first attack lands. If the notifier stops working (login refused, page changed), you get a Telegram text message instead of a call, at most once every 6 hours.
 
 
 ## 1. Telegram + CallMeBot (one time)
@@ -20,7 +20,7 @@ Telegram calls ring like phone calls, but Sleep mode blocks them unless you let 
 - Keep the **ring/silent switch on ring**. In silent mode a call only vibrates.
 - Ringer volume: **Settings → Sounds & Haptics** → slider to max, and turn off **Change with Buttons** so it is not lowered by accident.
 - **Settings → Face ID & Passcode → Attention Aware Features** off, or the ringer gets quieter as soon as you look at the phone.
-- Each call lasts at most 30 seconds (CallMeBot's limit), so an attack rings `CALL_COUNT` calls (default 3), 70 seconds apart.
+- Each call lasts at most 30 seconds (CallMeBot's limit), so for a longer alarm set `CALL_COUNT` above 1: that many calls, 70 seconds apart.
 - Test it for real: turn Sleep Focus on, lock the phone and run `npm run test-call` (one call) or `npm run test-alarm` (the full alarm), see step 3.
 
 ## 3. Server (first time)
