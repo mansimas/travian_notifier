@@ -1,0 +1,13 @@
+{
+  "name": "travian_notifier",
+  "version": "1.0.0",
+  "description": "Rings your phone (free Telegram call) when a Travian village gets an incoming attack",
+  "main": "notifier.js",
+  "private": true,
+  "engines": { "node": ">=16" },
+  "scripts": {
+    "start": "node notifier.js",
+    "check": "node notifier.js --check",
+    "test-call": "node notifier.js --test-call"
+  }
+}
