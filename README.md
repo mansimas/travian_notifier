@@ -40,6 +40,7 @@ After that, deploy from your machine with `deploy` inside `~/travian_notifier`, 
 
 On the server:
 - `curl -s localhost:1421/status` shows what the last check saw.
+- `curl -s -X POST localhost:1421/unmute` ends the 10 quiet hours after an alarm, e.g. after a test.
 - `pm2 logs TravianNotifier` shows the log.
 
 Locally, `node app.js` lifts without watching. Use `WATCH=1 node app.js` to watch for real.

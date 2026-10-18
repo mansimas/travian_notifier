@@ -99,6 +99,13 @@ module.exports = {
     loop();
   },
 
+  // Ends the quiet time after an alarm now, so the next new attack rings again.
+  unmute: function () {
+    delete state.alarmAt;
+    writeState();
+    sails.log.info('travian notifier: unmuted');
+  },
+
   status: function () {
     return {
       lastCheck,
