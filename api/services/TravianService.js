@@ -9,7 +9,7 @@ const https = require('https');
 
 const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
 
-let cookies = {};
+let cookies = {}; // per host: { [host]: { name: value } }, so a cookie never goes to another site
 
 // A failure worth telling the player about, by kind ('login', 'page').
 class Problem extends Error {
@@ -26,7 +26,7 @@ function request(method, url, { body, headers = {}, host = sails.config.travian.
       headers: {
         'User-Agent': USER_AGENT,
         'Accept-Language': 'en-US,en;q=0.9',
-        Cookie: Object.entries(cookies).map(([k, v]) => k + '=' + v).join('; '),
+        Cookie: Object.entries(cookies[target.host] || {}).map(([k, v]) => k + '=' + v).join('; '),
         ...(body ? { 'Content-Length': Buffer.byteLength(body) } : {}),
         ...headers,
       },
@@ -35,7 +35,8 @@ function request(method, url, { body, headers = {}, host = sails.config.travian.
       for (const line of res.headers['set-cookie'] || []) {
         const [pair] = line.split(';');
         const at = pair.indexOf('=');
-        cookies[pair.slice(0, at).trim()] = pair.slice(at + 1).trim();
+        cookies[target.host] = cookies[target.host] || {};
+        cookies[target.host][pair.slice(0, at).trim()] = pair.slice(at + 1).trim();
       }
       const chunks = [];
       res.on('data', c => chunks.push(c));
