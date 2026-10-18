@@ -23,6 +23,9 @@ module.exports.travian = {
   // After an alarm, no other alarm for this long: new attacks meanwhile are only logged.
   callCooldownHours: Number(process.env.CALL_COOLDOWN_HOURS || 10),
 
+  // Times on the /mute page are shown in this zone.
+  timezone: process.env.TIMEZONE || 'Europe/Vilnius',
+
   // Checks are pollMinutes apart plus up to pollJitterMinutes, so they do not come at a
   // machine-like steady beat.
   pollMinutes: Number(process.env.POLL_MINUTES || 3),

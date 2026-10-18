@@ -40,13 +40,13 @@ After that, deploy from your machine with `deploy` inside `~/travian_notifier`, 
 
 On the server:
 - `curl -s localhost:1421/status` shows what the last check saw.
-- `curl -s -X POST localhost:1421/unmute` ends the 10 quiet hours after an alarm, e.g. after a test. From the phone: open https://avogames.com/unmute.
+- `curl -s -X POST localhost:1421/mute` starts 10 quiet hours now (no call), `.../unmute` ends them, e.g. after a test. From the phone: open https://avogames.com/mute or https://avogames.com/unmute.
 
 nginx, inside the `listen 443` server block of `/etc/nginx/sites-available/avogames.com`, next to `location /`:
 
 ```nginx
-      location = /unmute {
-          proxy_pass http://127.0.0.1:1421/unmute;   # travian_notifier (pm2: "TravianNotifier")
+      location ~ ^/(mute|unmute)$ {
+          proxy_pass http://127.0.0.1:1421;   # travian_notifier (pm2: "TravianNotifier")
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
       }
 ```

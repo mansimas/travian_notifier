@@ -99,6 +99,13 @@ module.exports = {
     loop();
   },
 
+  // Starts the quiet time now, as if an alarm had just rung: no call for callCooldownHours.
+  mute: function () {
+    state.alarmAt = Date.now();
+    writeState();
+    sails.log.info('travian notifier: muted');
+  },
+
   // Ends the quiet time after an alarm now, so the next new attack rings again.
   unmute: function () {
     delete state.alarmAt;
