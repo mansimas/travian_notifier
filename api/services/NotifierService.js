@@ -2,8 +2,9 @@
  * NotifierService
  *
  * The watch loop: every few minutes TravianService.read(), and one phone call when any village
- * has more incoming attacks than at the last check. What the last check saw is kept in
- * .tmp/state.json, so a restart does not ring again for an attack already called.
+ * has more incoming attacks than at the last check - unless the last alarm was less than
+ * callCooldownHours ago, then the attack is only logged. What the last check saw and when the
+ * last alarm rang are kept in .tmp/state.json, so a restart does not ring again.
  *
  * When checks keep failing (login refused, page changed) the player gets one Telegram text -
  * never a call, a broken notifier must not wake anybody.
@@ -39,12 +40,18 @@ async function check() {
     if (movements && movements.inSeconds != null && fresh.includes(active)) {
       text += ' First attack on ' + active + ' arrives in ' + Math.round(movements.inSeconds / 60) + ' minutes.';
     }
-    sails.log.warn(text);
-    // A call that does not go through must still reach the phone somehow: as a text.
-    await PhoneService.alarm(text).catch(e => {
-      sails.log.error(e.message);
-      return PhoneService.message(text + ' (The call failed: ' + e.message + ')');
-    });
+    const quietUntil = (state.alarmAt || 0) + sails.config.travian.callCooldownHours * 60 * 60 * 1000;
+    if (Date.now() < quietUntil) {
+      sails.log.warn(text + ' (no call, quiet until ' + new Date(quietUntil).toISOString() + ')');
+    } else {
+      sails.log.warn(text);
+      // A call that does not go through must still reach the phone somehow: as a text.
+      await PhoneService.alarm(text).catch(e => {
+        sails.log.error(e.message);
+        return PhoneService.message(text + ' (The call failed: ' + e.message + ')');
+      });
+      state.alarmAt = Date.now();
+    }
   }
   state.counts = Object.fromEntries(villages.map(v => [v.id, v.attacks]));
   writeState();
@@ -93,7 +100,12 @@ module.exports = {
   },
 
   status: function () {
-    return { lastCheck, problemSentAt: state.problemSentAt || null };
+    return {
+      lastCheck,
+      alarmAt: state.alarmAt ? new Date(state.alarmAt).toISOString() : null,
+      quietUntil: state.alarmAt ? new Date(state.alarmAt + sails.config.travian.callCooldownHours * 60 * 60 * 1000).toISOString() : null,
+      problemSentAt: state.problemSentAt || null,
+    };
   },
 
   newAttacks,

@@ -20,6 +20,8 @@ module.exports.travian = {
   callCount: Number(process.env.CALL_COUNT || 1),
   callGapSeconds: Number(process.env.CALL_GAP_SECONDS || 70),
   callRepeat: Number(process.env.CALL_REPEAT || 3),
+  // After an alarm, no other alarm for this long: new attacks meanwhile are only logged.
+  callCooldownHours: Number(process.env.CALL_COOLDOWN_HOURS || 10),
 
   // Checks are pollMinutes apart plus up to pollJitterMinutes, so they do not come at a
   // machine-like steady beat.

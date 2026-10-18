@@ -4,7 +4,7 @@ Rings your iPhone with a free Telegram call when one of your Travian villages ge
 
 It runs on a server, so your PC can be off. Every 3–5 minutes it logs in to your account and reads `dorf1.php`, the same page the game shows you. The page carries the game's own count of incoming attacks for every village (`incomingAttacksAmount`). A village whose count went up since the last check means a new attack.
 
-Each new attack gives one call (more with `CALL_COUNT`), made by [CallMeBot](https://www.callmebot.com/blog/telegram-phone-call-using-api/). A voice reads out which villages are attacked and when the first attack lands. If the notifier stops working (login refused, page changed), you get a Telegram text message instead of a call, at most once every 6 hours.
+A new attack gives one call (more with `CALL_COUNT`), and after that no call for 10 hours (`CALL_COOLDOWN_HOURS`): attacks in that time are only logged. The call is made by [CallMeBot](https://www.callmebot.com/blog/telegram-phone-call-using-api/). A voice reads out which villages are attacked and when the first attack lands. If the notifier stops working (login refused, page changed), you get a Telegram text message instead of a call, at most once every 6 hours.
 
 
 ## 1. Telegram + CallMeBot (one time)
