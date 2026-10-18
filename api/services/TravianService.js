@@ -18,7 +18,7 @@ class Problem extends Error {
 
 // One request, following redirects and keeping cookies. Resolves { status, url, body } of the
 // last hop. host defaults to the game world.
-function request(method, url, { body, headers = {}, host = sails.config.travian.server } = {}, hops = 0) {
+function request(method, url, { body, headers = {}, host = sails.config.travian.server, timeout = 30 * 1000 } = {}, hops = 0) {
   const target = new URL(url, 'https://' + host);
   return new Promise((resolve, reject) => {
     const req = https.request(target, {
@@ -30,7 +30,7 @@ function request(method, url, { body, headers = {}, host = sails.config.travian.
         ...(body ? { 'Content-Length': Buffer.byteLength(body) } : {}),
         ...headers,
       },
-      timeout: 30 * 1000,
+      timeout,
     }, res => {
       for (const line of res.headers['set-cookie'] || []) {
         const [pair] = line.split(';');
@@ -44,7 +44,7 @@ function request(method, url, { body, headers = {}, host = sails.config.travian.
         const location = res.headers.location;
         if (res.statusCode >= 300 && res.statusCode < 400 && location && hops < 5) {
           const next = new URL(location, target);
-          resolve(request('GET', next.href, { host: next.host }, hops + 1));
+          resolve(request('GET', next.href, { host: next.host, timeout }, hops + 1));
         } else {
           resolve({ status: res.statusCode, url: target.href, body: Buffer.concat(chunks).toString('utf8') });
         }

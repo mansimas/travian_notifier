@@ -8,7 +8,8 @@
 function callMeBot(endpoint, text, extra = '') {
   const url = '/' + endpoint + '.php?source=web&user=' + encodeURIComponent(sails.config.travian.telegramUser)
     + '&text=' + encodeURIComponent(text) + extra;
-  return TravianService.request('GET', url, { host: 'api.callmebot.com' }).then(res => {
+  // CallMeBot answers only once the call is over (up to 30 s of ringing plus the talk), so wait long.
+  return TravianService.request('GET', url, { host: 'api.callmebot.com', timeout: 2 * 60 * 1000 }).then(res => {
     if (res.status !== 200) throw new Error('CallMeBot ' + endpoint + ' HTTP ' + res.status + ': ' + res.body.slice(0, 200));
     const answer = res.body.replace(/<script[^]*?<\/script>/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     sails.log.info('CallMeBot ' + endpoint + ': ' + answer.slice(0, 500));
