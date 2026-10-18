@@ -22,7 +22,9 @@ const commands = {
     console.log('incoming attacks on active village:', movements || 'none');
     console.log('page saved to dorf1.html');
   },
-  'test-call': () => PhoneService.call('Travian alarm test. Your notifier can wake you up.'),
+  'test-call': async function () {
+    console.log('CallMeBot: ' + await PhoneService.call('Travian alarm test. Your notifier can wake you up.'));
+  },
 };
 
 const command = commands[process.argv[2]];
