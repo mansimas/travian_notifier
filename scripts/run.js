@@ -2,6 +2,7 @@
  * One-off commands, run on the server next to the live app:
  *   npm run check       log in once, print the villages and attacks it sees, save dorf1.html
  *   npm run test-call   ring the phone once
+ *   npm run test-alarm  the full alarm: several calls, as an attack rings it
  * Loads sails without the http server, so it does not clash with the running app.
  */
 process.chdir(require('path').join(__dirname, '..'));
@@ -24,6 +25,11 @@ const commands = {
   },
   'test-call': async function () {
     console.log('CallMeBot: ' + await PhoneService.call('Travian alarm test. Your notifier can wake you up.'));
+  },
+  // The full alarm as an attack would ring it: CALL_COUNT calls, CALL_GAP_SECONDS apart.
+  'test-alarm': async function () {
+    await PhoneService.alarm('Travian alarm test. Your village is under attack. Wake up.');
+    console.log('alarm done');
   },
 };
 

@@ -41,7 +41,7 @@ async function check() {
     }
     sails.log.warn(text);
     // A call that does not go through must still reach the phone somehow: as a text.
-    await PhoneService.call(text).catch(e => {
+    await PhoneService.alarm(text).catch(e => {
       sails.log.error(e.message);
       return PhoneService.message(text + ' (The call failed: ' + e.message + ')');
     });

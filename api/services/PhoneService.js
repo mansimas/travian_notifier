@@ -20,7 +20,25 @@ function callMeBot(endpoint, text, extra = '') {
 }
 
 module.exports = {
-  // rpt=2: the text is read twice, for a half-awake listener.
-  call: text => callMeBot('start', text, '&lang=' + encodeURIComponent(sails.config.travian.callLang) + '&rpt=2'),
+  call: text => callMeBot('start', text, '&lang=' + encodeURIComponent(sails.config.travian.callLang) + '&rpt=' + sails.config.travian.callRepeat),
+
+  // The alarm: callCount calls, callGapSeconds apart. Resolves once all are placed; throws only
+  // if none got through.
+  alarm: async function (text) {
+    const { callCount, callGapSeconds } = sails.config.travian;
+    let placed = 0;
+    let lastError;
+    for (let i = 0; i < callCount; i++) {
+      if (i) await new Promise(r => setTimeout(r, callGapSeconds * 1000));
+      try {
+        await module.exports.call(text);
+        placed++;
+      } catch (e) {
+        lastError = e;
+        sails.log.error('alarm call ' + (i + 1) + '/' + callCount + ': ' + e.message);
+      }
+    }
+    if (!placed) throw lastError;
+  },
   message: text => callMeBot('text', text),
 };

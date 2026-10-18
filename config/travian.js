@@ -13,6 +13,13 @@ module.exports.travian = {
   // The Telegram @username CallMeBot calls, and the voice it reads the alarm with.
   telegramUser: process.env.TELEGRAM_USER,
   callLang: process.env.CALL_LANG || 'en-GB-Standard-B',
+  // CallMeBot hangs up after 30 seconds, so a longer alarm is several calls: callCount calls,
+  // callGapSeconds apart (CallMeBot refuses two calls to one user within 65 seconds; a second
+  // call within 3 minutes also passes the iPhone's "repeated calls" exception in Sleep Focus).
+  // Each call reads the text callRepeat times.
+  callCount: Number(process.env.CALL_COUNT || 3),
+  callGapSeconds: Number(process.env.CALL_GAP_SECONDS || 70),
+  callRepeat: Number(process.env.CALL_REPEAT || 3),
 
   // Checks are pollMinutes apart plus up to pollJitterMinutes, so they do not come at a
   // machine-like steady beat.
