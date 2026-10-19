@@ -196,10 +196,12 @@ function parseReport(html, id) {
   };
 }
 
-// The newest oasis raid reports, read or not (you may have opened them in the browser): up to
-// REPORT_PAGES pages, until a page holds only reports already kept. A report the backfill saved
-// is taken from its file instead of being opened again.
-const REPORT_PAGES = 3;
+// The newest oasis raid reports, read or not (you may have opened them in the browser), back to
+// the last one kept: page after page (up to REPORT_PAGES) until a page holds only reports already
+// kept. At most MAX_REPORTS_PER_ROUND are opened; the rest waits for the next round, which then
+// pages past the kept ones (state.reportBacklog). A report the backfill saved is taken from its
+// file instead of being opened again.
+const REPORT_PAGES = 20;
 
 async function readReports() {
   let history = [];
@@ -207,7 +209,8 @@ async function readReports() {
   const saved = new Map(history.map(r => [r.id, r]));
   const have = new Set(state.reports.map(r => r.id));
   let read = 0;
-  for (let p = 1; p <= REPORT_PAGES; p++) {
+  let capped = false;
+  for (let p = 1; p <= REPORT_PAGES && !capped; p++) {
     if (p > 1) await pause(cfg().pageGapSeconds);
     const list = await page('GET', '/report/offensive' + (p > 1 ? '?page=' + p : ''));
     const rows = [...list.matchAll(/<tr>\s*<td class="sel">[\s\S]*?<\/tr>/g)].map(m => m[0])
@@ -222,7 +225,10 @@ async function readReports() {
       fresh++;
       let report = saved.get(id);
       if (!report) {
-        if (read >= MAX_REPORTS_PER_ROUND) break;
+        if (read >= MAX_REPORTS_PER_ROUND) {
+          capped = true;
+          break;
+        }
         await pause(cfg().pageGapSeconds);
         report = parseReport(await page('GET', '/report?' + query), id);
         read++;
@@ -232,8 +238,9 @@ async function readReports() {
       have.add(id);
       matchReport(report);
     }
-    if (!fresh || !/class="next"/.test(list)) break;
+    if ((!fresh && !state.reportBacklog) || !/class="next"/.test(list)) break;
   }
+  state.reportBacklog = capped;
   return read;
 }
 
