@@ -142,7 +142,7 @@ function decode(s) {
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n)).trim();
 }
 
-// Everything one look at dorf1.php tells: { html, villages, active, movements }. movements is
+// Everything one look at dorf1.php tells: { html, viewData, villages, active, movements }. movements is
 // only the active village's (dorf1.php shows no others), used for the arrival time.
 async function read() {
   const html = await loadDorf1();
@@ -150,7 +150,7 @@ async function read() {
   const villages = parseVillages(viewData);
   if (!villages.length) throw new Problem('page', 'No villages found on dorf1.php, the page layout may have changed. Run npm run check.');
   const active = viewData.ownPlayer.village ? viewData.ownPlayer.village.name : null;
-  return { html, villages, active, movements: parseMovements(html) };
+  return { html, viewData, villages, active, movements: parseMovements(html) };
 }
 
-module.exports = { Problem, request, read, parseViewData, parseVillages, parseMovements };
+module.exports = { Problem, request, login, read, parseViewData, parseVillages, parseMovements };

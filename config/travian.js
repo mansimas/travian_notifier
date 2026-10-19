@@ -23,6 +23,10 @@ module.exports.travian = {
   // After an alarm, no other alarm for this long: new attacks meanwhile are only logged.
   callCooldownHours: Number(process.env.CALL_COOLDOWN_HOURS || 10),
 
+  // GET /oases and npm run oases: the village the oasis stages are counted from (by name;
+  // the first village when not set).
+  oasisVillage: process.env.OASIS_VILLAGE,
+
   // Times on the /mute page are shown in this zone.
   timezone: process.env.TIMEZONE || 'Europe/Vilnius',
 
