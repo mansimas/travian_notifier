@@ -337,17 +337,27 @@ async function planEmpty(v, home, oases, log) {
   return ok;
 }
 
-// [{ oasis, army, plan }] for a village in mode 'animals'.
+// [{ oasis, army, plan }] for a village in mode 'animals'. If the checked oasis differs from the
+// map block, every chosen oasis is asked one by one and the plan is made again from that.
 async function planAnimals(v, village, home, oases, log) {
-  const chosen = RaidPlanService.plan(village, oases.filter(o => o.animals.length), home)
+  const planFrom = list => RaidPlanService.plan(village, list.filter(o => o.animals.length), home)
     .map(({ oasis, plan }) => ({ oasis, army: plan.army, plan }));
+  let chosen = planFrom(oases);
   if (!chosen.length) return chosen;
   const pick = chosen[Math.floor(Math.random() * chosen.length)];
   await pause(cfg().pageGapSeconds);
   const tile = await OasisService.tileAnimals(pick.oasis.x, pick.oasis.y);
   log.check = { key: pick.oasis.x + '|' + pick.oasis.y, same: !tile.taken && OasisService.sameAnimals(tile.animals, pick.oasis.animals) };
-  if (tile.taken) OasisService.recordTaken([pick.oasis]);
-  return log.check.same ? chosen : []; // the map block lags: next round
+  if (log.check.same) return chosen;
+  const fresh = [];
+  for (const c of chosen) {
+    if (c !== pick) await pause(cfg().pageGapSeconds);
+    const t = c === pick ? tile : await OasisService.tileAnimals(c.oasis.x, c.oasis.y);
+    if (t.taken) OasisService.recordTaken([c.oasis]);
+    else fresh.push({ ...c.oasis, animals: t.animals });
+  }
+  log.check.replanned = fresh.length;
+  return planFrom(fresh);
 }
 
 async function round() {
@@ -382,7 +392,11 @@ async function round() {
       const vlog = log.villages[v.name];
       const oases = await candidates(village, v.stages, busy);
       const chosen = v.mode === 'empty' ? await planEmpty(v, home, oases, vlog) : await planAnimals(v, village, home, oases, vlog);
-      vlog.targets = chosen.map(t => ({ key: t.oasis.x + '|' + t.oasis.y, army: t.army }));
+      vlog.targets = chosen.map(t => ({
+        key: t.oasis.x + '|' + t.oasis.y, stage: t.oasis.stage, distance: t.oasis.distance, army: t.army,
+        animals: t.oasis.animals.map(a => a.count + ' ' + a.unit).join(', '),
+        ...(t.plan ? { dead: t.plan.totalDeaths, gain: t.plan.gain, lost: Math.round(t.plan.lostRes) } : {}),
+      }));
       vlog.sent = [];
       for (const t of chosen) {
         const key = t.oasis.x + '|' + t.oasis.y;
