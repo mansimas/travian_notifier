@@ -41,6 +41,7 @@ const commands = {
     console.log(scan.village.name + ' (' + scan.village.x + '|' + scan.village.y + '): ' + scan.counts.free + ' free / '
       + scan.counts.occupied + ' taken oases within ' + scan.radius + ', scanned ' + scan.scanned);
     console.log('stage ' + animals.stage + ': ' + animals.source + ', ' + animals.seconds.toFixed(1) + ' s');
+    if (animals.skipped.length) console.log('  skipped, taken now or before: ' + animals.skipped.map(o => '(' + o.x + '|' + o.y + ')' + (o.owner ? ' ' + o.owner : '')).join(', '));
     for (const c of animals.checks) console.log('  check (' + c.x + '|' + c.y + '): ' + (c.same ? 'same' : 'DIFFERENT ' + JSON.stringify(c)));
     for (const o of animals.oases) {
       const list = o.animals.map(a => a.unit + ' ' + a.count).join(', ');

@@ -10,6 +10,9 @@
  *    near stage; its tooltip texts list each oasis's animals. CHECK_COUNT oases are compared
  *    with tile-details first; on any difference (or no animal lists) every oasis is asked one
  *    by one.
+ * Oases seen taken by a player even once are remembered in .tmp/oasis-taken.json and left out
+ * of every stage from then on, also after the owner gives them up: only never-owned oases
+ * (nature only) are listed and asked about.
  * Requests go one at a time with pauses, and only one job runs at a time.
  */
 const fs = require('fs');
@@ -29,6 +32,7 @@ const MAP_SIZE = 401; // map wraps around from -200 to 200
 
 const wrap = v => ((((v + 200) % MAP_SIZE) + MAP_SIZE) % MAP_SIZE) - 200; // also the shortest signed difference
 const pause = (gap, jitter) => new Promise(r => setTimeout(r, gap + Math.random() * jitter));
+const TAKEN_FILE = path.join(process.cwd(), '.tmp', 'oasis-taken.json');
 const scanFile = village => path.join(process.cwd(), '.tmp', 'oases-' + village.x + '_' + village.y + '.json');
 
 let running = null; // the job in progress, so two never run at once
@@ -55,6 +59,30 @@ async function api(apiPath, data) {
   }
   if (!json) throw new TravianService.Problem('page', apiPath + ' failed (HTTP ' + res.status + '): ' + res.body.slice(0, 200));
   return json;
+}
+
+// "x|y" -> { owner, alliance, seen }: every oasis ever seen owned by a player, seen = first time.
+function loadTaken() {
+  try { return JSON.parse(fs.readFileSync(TAKEN_FILE, 'utf8')); } catch (e) { return {}; }
+}
+
+function recordTaken(list) {
+  const taken = loadTaken();
+  let added = 0;
+  for (const o of list) {
+    const key = o.x + '|' + o.y;
+    const before = taken[key];
+    if (!before) added++;
+    taken[key] = {
+      owner: o.owner || (before && before.owner) || null,
+      alliance: o.alliance || (before && before.alliance) || null,
+      seen: before ? before.seen : new Date().toISOString(),
+    };
+  }
+  fs.mkdirSync(path.dirname(TAKEN_FILE), { recursive: true });
+  fs.writeFileSync(TAKEN_FILE, JSON.stringify(taken, null, 1));
+  if (added) sails.log.info('oases: ' + added + ' newly seen taken');
+  return taken;
 }
 
 const requestBlock = (x, y) => api('map/position', { data: { x, y, zoomLevel: ZOOM_LEVEL, ignorePositions: [] } });
@@ -111,11 +139,13 @@ function parseAnimals(html) {
   return [...found].map(([unit, count]) => ({ unit, count }));
 }
 
+// { animals, taken }: a taken oasis links its owner's profile.
 async function tileAnimals(x, y) {
   const data = await api('map/tile-details', { x, y });
   const html = typeof data === 'string' ? data : (data && data.html) || '';
+  if (/href="\/profile\//.test(html)) return { animals: [], taken: true };
   const start = html.indexOf('id="troop_info"');
-  return parseAnimals(start < 0 ? html : html.slice(start, html.indexOf('</table>', start)));
+  return { animals: parseAnimals(start < 0 ? html : html.slice(start, html.indexOf('</table>', start))), taken: false };
 }
 
 // Map blocks until every field within SCAN_RADIUS of the village was in one: the first block
@@ -183,7 +213,8 @@ async function scanBlocks(village) {
   const list = [...oases.values()]
     .map(o => ({ ...o, distance: Math.round(distance(o.x, o.y) * 100) / 100 }))
     .sort((a, b) => a.distance - b.distance);
-  const free = list.filter(o => o.free);
+  const taken = recordTaken(list.filter(o => !o.free));
+  const free = list.filter(o => o.free && !taken[o.x + '|' + o.y]);
   const stages = [];
   for (let i = 0; i < STAGES; i++) {
     const part = free.slice(Math.round(i * free.length / STAGES), Math.round((i + 1) * free.length / STAGES));
@@ -201,7 +232,7 @@ async function scanBlocks(village) {
     radius: SCAN_RADIUS,
     scanned: new Date().toISOString(),
     requests,
-    counts: { all: list.length, free: free.length, occupied: list.length - free.length },
+    counts: { all: list.length, free: free.length, occupied: list.filter(o => !o.free).length, wereTaken: list.filter(o => o.free).length - free.length },
     stages,
     occupied: list.filter(o => !o.free).map(({ x, y, distance: d, owner, alliance, bonus }) => ({ x, y, distance: d, owner, alliance, bonus })),
   };
@@ -213,7 +244,10 @@ async function scan(village, { fresh = false } = {}) {
   if (!fresh) {
     try {
       const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (Date.now() - Date.parse(saved.scanned) < SCAN_MAX_AGE_DAYS * 24 * 60 * 60 * 1000) return saved;
+      if (Date.now() - Date.parse(saved.scanned) < SCAN_MAX_AGE_DAYS * 24 * 60 * 60 * 1000) {
+        recordTaken(saved.occupied);
+        return saved;
+      }
     } catch (e) { /* none yet */ }
   }
   const result = await scanBlocks(village);
@@ -227,9 +261,18 @@ const sameAnimals = (a, b) => a.length === b.length && a.every(t => b.some(u => 
 
 async function stageAnimals(village, stage) {
   const started = Date.now();
-  const oases = stage.oases.map(o => ({ ...o, animals: null }));
+  const wasTaken = loadTaken();
+  const skipped = stage.oases.filter(o => wasTaken[o.x + '|' + o.y]).map(o => ({ x: o.x, y: o.y, ...wasTaken[o.x + '|' + o.y] }));
+  let oases = stage.oases.filter(o => !wasTaken[o.x + '|' + o.y]).map(o => ({ ...o, animals: null }));
   const reply = await requestBlock(village.x, village.y);
   const byKey = new Map(((reply && reply.tiles) || []).map(t => [t.position.x + '|' + t.position.y, t]));
+  // Taken since the scan: remembered and left out.
+  const nowTaken = oases.map(o => byKey.get(o.x + '|' + o.y)).map(t => t && oasisOf(t)).filter(o => o && !o.free);
+  if (nowTaken.length) {
+    recordTaken(nowTaken);
+    skipped.push(...nowTaken.map(({ x, y, owner, alliance }) => ({ x, y, owner, alliance })));
+    oases = oases.filter(o => !nowTaken.some(t => t.x === o.x && t.y === o.y));
+  }
   let listed = 0;
   for (const o of oases) {
     const t = byKey.get(o.x + '|' + o.y);
@@ -242,7 +285,7 @@ async function stageAnimals(village, stage) {
   const sample = [...oases.filter(o => o.animals && o.animals.length), ...oases.filter(o => o.animals && !o.animals.length)];
   for (const o of listed ? sample.slice(0, CHECK_COUNT) : []) {
     await pause(TILE_GAP_MS, TILE_JITTER_MS);
-    const tile = await tileAnimals(o.x, o.y);
+    const { animals: tile } = await tileAnimals(o.x, o.y);
     checks.push({ x: o.x, y: o.y, block: o.animals, tile, same: sameAnimals(o.animals, tile) });
     o.animals = tile;
     o.checked = true;
@@ -251,9 +294,16 @@ async function stageAnimals(village, stage) {
   for (const o of oases) {
     if (o.checked || (ok && o.animals)) continue;
     await pause(TILE_GAP_MS, TILE_JITTER_MS);
-    o.animals = await tileAnimals(o.x, o.y);
+    const tile = await tileAnimals(o.x, o.y);
+    o.animals = tile.animals;
     o.checked = true;
+    if (tile.taken) {
+      o.taken = true;
+      recordTaken([o]);
+      skipped.push({ x: o.x, y: o.y, owner: null, alliance: null });
+    }
   }
+  oases = oases.filter(o => !o.taken);
   return {
     village,
     stage: stage.stage,
@@ -262,6 +312,7 @@ async function stageAnimals(village, stage) {
     source: ok ? 'map block' : listed ? 'one by one (map block differed)' : 'one by one (map block had no animals)',
     checks,
     oases,
+    skipped, // taken now or before: not listed
   };
 }
 
