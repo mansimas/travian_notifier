@@ -207,6 +207,47 @@ async function readReports() {
   return read;
 }
 
+// Every oasis raid report still in the game (read or not), page by page, one request every
+// gapSeconds (random), into .tmp/report-history.json. Reports already there are not opened
+// again, so it can stop and go on later. Its own file: the running app writes autoraid.json.
+const HISTORY_FILE = path.join(process.cwd(), '.tmp', 'report-history.json');
+
+async function backfillReports({ gapSeconds = [3, 6], maxPages = 200 } = {}) {
+  let history = [];
+  try { history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')); } catch (e) { /* first run */ }
+  const have = new Set(history.map(r => r.id));
+  const save = () => {
+    fs.mkdirSync(path.dirname(HISTORY_FILE), { recursive: true });
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
+  };
+  let pages = 0, added = 0;
+  for (let p = 1; p <= maxPages; p++) {
+    if (p > 1) await pause(gapSeconds);
+    const list = await page('GET', '/report/offensive?page=' + p);
+    pages++;
+    const rows = [...list.matchAll(/<tr>\s*<td class="sel">[\s\S]*?<\/tr>/g)].map(m => m[0])
+      .filter(r => /raids Unoccupied oasis/.test(plain(r)));
+    for (const row of rows) {
+      const href = (row.match(/href="\?(id=[^"]+)"/) || [])[1];
+      if (!href) continue;
+      const query = href.replace(/&amp;/g, '&');
+      const id = decodeURIComponent(query.match(/id=([^&]+)/)[1]);
+      if (have.has(id)) continue;
+      await pause(gapSeconds);
+      const report = parseReport(await page('GET', '/report?' + query), id);
+      if (!report) continue;
+      history.push(report);
+      have.add(id);
+      added++;
+      save();
+    }
+    sails.log.info('reports backfill: page ' + p + ', ' + added + ' new, ' + history.length + ' in all');
+    if (!/class="next"/.test(list)) break;
+  }
+  save();
+  return { pages, added, total: history.length };
+}
+
 // ---- one round ------------------------------------------------------------------------------
 
 async function round() {
@@ -379,6 +420,7 @@ module.exports = {
     };
   },
 
+  backfillReports,
   parseReport,
   outgoingTargets,
   available,

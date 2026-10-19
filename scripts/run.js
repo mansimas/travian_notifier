@@ -6,6 +6,9 @@
  *   npm run oases -- [stage] [village] [fresh]
  *                       animals of one oasis stage (1 = closest), saves .tmp/oases-<x>_<y>.json
  *   npm run autoraid    one auto raid round now (AUTO_RAID_SEND=0 for a dry run)
+ *   npm run reports-backfill
+ *                       every oasis raid report still in the game into .tmp/report-history.json,
+ *                       slowly (one request every 3-6 s); run it again to go on
  * Loads sails without the http server, so it does not clash with the running app.
  */
 process.chdir(require('path').join(__dirname, '..'));
@@ -13,7 +16,7 @@ require('dotenv').config();
 const fs = require('fs');
 const rc = require('sails/accessible/rc')('sails');
 rc.hooks = { ...rc.hooks, http: false };
-rc.log = { level: 'warn', noShip: true };
+rc.log = { level: process.argv[2] === 'reports-backfill' ? 'info' : 'warn', noShip: true }; // backfill logs its progress
 rc.travian = { watch: false };
 
 const commands = {
@@ -37,6 +40,9 @@ const commands = {
   autoraid: async function () {
     const log = await AutoRaidService.round();
     console.log(JSON.stringify(log, null, 1));
+  },
+  'reports-backfill': async function () {
+    console.log(JSON.stringify(await AutoRaidService.backfillReports()));
   },
   oases: async function () {
     const args = process.argv.slice(3);
