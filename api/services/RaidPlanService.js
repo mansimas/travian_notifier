@@ -7,10 +7,10 @@
  *    the closest; the smallest army from INF_MIN up whose losses stay within INF_LOSS (70%) of the
  *    kill bonus; until fewer than INF_MIN are left;
  *  - then cavalry (Steppe Rider, Marksman, Marauder as one mixed group, at least CAV_MIN): never
- *    into crop oases, only where animals weak against horses outweigh the strong ones 4:1
+ *    into crop oases, only where animals weak against horses outweigh the strong ones 1.5:1
  *    (points per animal), losses within CAV_LOSS; the army with the most profit per troop-hour,
  *    best oases first;
- *  - an oasis that is not crop and fails the 4:1 test is not raided at all;
+ *  - an oasis that is not crop and fails the 1.5:1 test is not raided at all;
  *  - nor one whose kill bonus is under MIN_GAIN: not worth the troops' time.
  * Battles are simulated with lib/battle.js, a copy of the browser plugin's simulator.
  */
@@ -37,7 +37,8 @@ const MAP_SIZE = 401;
 
 const wrap = v => ((((v + 200) % MAP_SIZE) + MAP_SIZE) % MAP_SIZE) - 200;
 const points = (animals, table) => animals.reduce((s, a) => s + (table[a.unit] || 0) * a.count, 0);
-const cavAllowed = animals => points(animals, WEAK_VS_CAV) >= 4 * points(animals, STRONG_VS_CAV);
+const CAV_RATIO = 1.5; // weak : strong points at least this
+const cavAllowed = animals => points(animals, WEAK_VS_CAV) >= CAV_RATIO * points(animals, STRONG_VS_CAV);
 const isCrop = o => !!(o.bonus && o.bonus.r4);
 const cost = army => Object.entries(army).reduce((s, [u, n]) => s + n * B.UNITS[u].cost, 0);
 
