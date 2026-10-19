@@ -20,6 +20,7 @@ const STATE_FILE = path.join(process.cwd(), '.tmp', 'autoraid.json');
 const KEEP = 2000; // raids and reports kept
 const MAX_BLOCKS = 8;
 const MAX_REPORTS_PER_ROUND = 15;
+const MAX_OUTGOING_PAGES = 20;
 const MINUTE = 60 * 1000;
 
 let state = { raids: [], reports: [], lastRound: null };
@@ -221,8 +222,13 @@ async function round() {
   for (const name of c.watchVillages) {
     const v = await OasisService.findVillage(name).catch(() => null);
     if (!v) continue;
-    await pause(c.pageGapSeconds);
-    for (const key of outgoingTargets(await page('GET', '/build.php?newdid=' + v.id + '&gid=16&tt=1&filter=2&subfilters=4'))) busy.add(key);
+    // 10 movements per page: every page, as long as there is a next one.
+    for (let p = 1; p <= MAX_OUTGOING_PAGES; p++) {
+      await pause(c.pageGapSeconds);
+      const html = await page('GET', '/build.php?newdid=' + v.id + '&gid=16&tt=1&filter=2&subfilters=4' + (p > 1 ? '&page=' + p : ''));
+      for (const key of outgoingTargets(html)) busy.add(key);
+      if (!html.includes('page=' + (p + 1))) break;
+    }
   }
   log.onTheirWay = busy.size;
 
