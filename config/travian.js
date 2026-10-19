@@ -27,20 +27,20 @@ module.exports.travian = {
   // the first village when not set).
   oasisVillage: process.env.OASIS_VILLAGE,
 
-  // Auto raids (AutoRaidService): every minMinutes..maxMinutes (random) the village sends
-  // Mercenaries to the empty never-owned oases of the first stages, closest first, as long as
-  // troops last. AUTO_RAID_SEND=0 = dry run: everything is read and logged, nothing is sent
-  // and no report is opened.
+  // Auto raids (AutoRaidService): every minMinutes..maxMinutes (random) each village raids
+  // oases of its first stages as long as troops last. Mode 'empty': Mercenaries to empty oases,
+  // perStage[stage] each. Mode 'animals': oases with animals, armies by RaidPlanService.
+  // AUTO_RAID_SEND=0 = dry run: everything is read and logged, nothing is sent and no report
+  // is opened. GET /stop and /start pause and resume the sends.
   autoRaid: {
     enabled: process.env.AUTO_RAID === '1',
     send: process.env.AUTO_RAID_SEND !== '0',
-    village: process.env.AUTO_RAID_VILLAGE || 'mansim1',
-    // Villages whose outgoing troops are checked, so no oasis gets a second raid.
-    watchVillages: (process.env.AUTO_RAID_WATCH || 'mansim1,mansim2').split(',').map(s => s.trim()).filter(Boolean),
-    unit: 'u61', // Mercenary
-    perStage: { 1: 50, 2: 50, 3: 100, 4: 100 },
+    villages: [
+      { name: 'mansim1', mode: 'empty', unit: 'u61', stages: 4, perStage: { 1: 50, 2: 50, 3: 100, 4: 100 } },
+      { name: 'mansim2', mode: 'animals', stages: 8 },
+    ],
     minMinutes: 1,
-    maxMinutes: 10,
+    maxMinutes: 5,
     // Pause between two sends of one round, and between other page loads.
     sendGapSeconds: [2, 6],
     pageGapSeconds: [1, 3],

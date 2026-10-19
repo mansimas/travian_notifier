@@ -1,17 +1,20 @@
 /**
  * AutoRaidService
  *
- * Raids empty oases from one village (sails.config.travian.autoRaid), round after round, every
- * minMinutes..maxMinutes at random. One round:
- *  1. outgoing troops of the watched villages: an oasis with a raid on its way gets no other;
- *  2. Mercenaries at home in the raiding village (rally point send form);
- *  3. the oases of the first stages (OasisService scan of that village): never-owned, from map
- *     blocks; one empty one is checked against tile-details, all chosen ones if that differs;
- *  4. one raid per empty oasis, closest first: perStage[stage] Mercenaries, as long as that
- *     many are at home (the rest stays home);
- *  5. unread oasis raid reports are opened and their results kept for /autoraid.
+ * Raids oases from the villages in sails.config.travian.autoRaid.villages, round after round,
+ * every minMinutes..maxMinutes at random, unless stopped (GET /stop, /start). One round:
+ *  1. troops at home in each village (rally point send form); villages with too few skip 2-4;
+ *  2. outgoing troops of all those villages: an oasis with a raid on its way gets no other;
+ *  3. the never-owned oases of each village's first stages (OasisService scan), animals from
+ *     map blocks; one chosen oasis is checked against tile-details:
+ *     - mode 'empty': empty oases, closest first, perStage[stage] Mercenaries each, as long as
+ *       that many are at home; all chosen ones are checked if the first differs;
+ *     - mode 'animals': oases with animals, armies by RaidPlanService; nothing is sent this
+ *       round if the check differs (the map block lags);
+ *  4. the raids are sent, with what was planned (for the evaluation in /autoraid);
+ *  5. unread oasis raid reports are opened and matched to the raids sent.
  * With send off (dry run) step 4 only logs what it would send, and step 5 is left out.
- * Kept in .tmp/autoraid.json: raids sent, reports read, the last round.
+ * Kept in .tmp/autoraid.json: raids sent, reports read, stopped or not, the last round.
  */
 const fs = require('fs');
 const path = require('path');
@@ -23,11 +26,10 @@ const MAX_REPORTS_PER_ROUND = 15;
 const MAX_OUTGOING_PAGES = 20;
 const MINUTE = 60 * 1000;
 
-let state = { raids: [], reports: [], lastRound: null };
-let running = false;
+let state = { raids: [], reports: [], lastRound: null, stopped: false };
 
 function readState() {
-  try { state = { raids: [], reports: [], lastRound: null, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) }; } catch (e) { /* first run */ }
+  try { state = { raids: [], reports: [], lastRound: null, stopped: false, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) }; } catch (e) { /* first run */ }
 }
 
 function writeState() {
@@ -101,8 +103,10 @@ async function blocksFor(village, keys) {
   return tiles;
 }
 
-// Confirmation page -> { body, arrival } for the final post, or throws.
-function confirmForm(html, n, slot) {
+const slotOf = unit => Number(unit.slice(1)) % 10 || 10; // u61 -> 1, u70 -> 10
+
+// Confirmation page -> { body, arrival } for the final post, or throws. army: { uNN: n }.
+function confirmForm(html, army) {
   const at = html.indexOf('id="troopSendForm"');
   if (at < 0) {
     const err = html.match(/class="error[^"]*"[^>]*>([\s\S]*?)<\//);
@@ -111,8 +115,11 @@ function confirmForm(html, n, slot) {
   const form = html.slice(html.lastIndexOf('<form', at), html.indexOf('</form>', at));
   if (!/Nature/.test(plain(form))) throw new Error('target is not nature any more');
   const fields = [...form.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)"/g)].map(m => [m[1], m[2]]);
-  const sent = fields.find(([k]) => k === 'troops[0][t' + slot + ']');
-  if (!sent || Number(sent[1]) !== n) throw new Error('confirmation shows ' + (sent ? sent[1] : 'no') + ' troops instead of ' + n);
+  for (let slot = 1; slot <= 10; slot++) {
+    const want = Object.entries(army).filter(([u]) => slotOf(u) === slot).reduce((s, [, n]) => s + n, 0);
+    const sent = fields.find(([k]) => k === 'troops[0][t' + slot + ']');
+    if (Number(sent ? sent[1] : 0) !== want) throw new Error('confirmation shows ' + (sent ? sent[1] : 0) + ' in slot t' + slot + ' instead of ' + want);
+  }
   const checksum = (html.match(/input\[name=checksum\]'\)\.value = '([^']+)'/) || [])[1];
   if (!checksum) throw new Error('no checksum on the confirmation page');
   const body = new URLSearchParams(fields.map(([k, v]) => [k, k === 'checksum' ? checksum : v.replace(/&amp;/g, '&')])).toString();
@@ -122,15 +129,16 @@ function confirmForm(html, n, slot) {
 
 const FORM = { 'Content-Type': 'application/x-www-form-urlencoded' };
 
-async function sendRaid(village, key, n, slot) {
+async function sendRaid(village, key, army) {
   const [x, y] = key.split('|');
   await page('GET', '/build.php?newdid=' + village.id + '&gid=16&tt=2&eventType=4&x=' + x + '&y=' + y);
   await pause(cfg().pageGapSeconds);
   const p = new URLSearchParams();
-  for (let i = 1; i <= 11; i++) p.set('troop[t' + i + ']', i === slot ? String(n) : '');
+  for (let i = 1; i <= 11; i++) p.set('troop[t' + i + ']', '');
+  for (const [u, n] of Object.entries(army)) p.set('troop[t' + slotOf(u) + ']', String(n));
   p.set('villagename', ''); p.set('x', x); p.set('y', y); p.set('eventType', '4'); p.set('ok', 'ok');
   const confirm = await page('POST', '/build.php?gid=16&tt=2', { body: p.toString(), headers: FORM });
-  const { body, arrival } = confirmForm(confirm, n, slot);
+  const { body, arrival } = confirmForm(confirm, army);
   await pause(cfg().pageGapSeconds);
   const done = await page('POST', '/build.php?gid=16&tt=2', { body, headers: FORM });
   if (done.includes('id="confirmSendTroops"')) throw new Error('the game did not accept the send');
@@ -201,10 +209,18 @@ async function readReports() {
     const report = parseReport(await page('GET', '/report?' + href.replace(/&amp;/g, '&')), id);
     if (report) {
       state.reports.push(report);
+      matchReport(report);
       read++;
     }
   }
   return read;
+}
+
+// The raid this report belongs to: same oasis, village and army, the earliest without one.
+function matchReport(report) {
+  const same = (a, b) => Object.keys({ ...a, ...b }).every(u => (a[u] || 0) === (b[u] || 0));
+  const raid = state.raids.find(r => !r.reportId && r.key === report.key && r.village === report.village && r.army && same(r.army, report.sent));
+  if (raid) raid.reportId = report.id;
 }
 
 // Every oasis raid report still in the game (read or not), page by page, one request every
@@ -250,105 +266,146 @@ async function backfillReports({ gapSeconds = [3, 6], maxPages = 200 } = {}) {
 
 // ---- one round ------------------------------------------------------------------------------
 
-async function round() {
-  const c = cfg();
-  const slot = Number(c.unit.slice(1)) % 10 || 10;
-  const village = await OasisService.findVillage(c.village);
-  const scan = await OasisService.scan(village);
-  const stages = scan.stages.filter(s => c.perStage[s.stage]);
-  const log = { at: new Date().toISOString(), dryRun: !c.send, village: village.name };
+const SLOTS = { u61: 1, u62: 2, u64: 4, u65: 5, u66: 6 };
 
-  // 1. Raids already on their way, from the watched villages and from our own log.
+// Raids already on their way: from our own log and the outgoing troops of these villages.
+async function onTheirWay(villages) {
   const busy = new Set(state.raids.filter(r => r.arrival && r.arrival * 1000 > Date.now()).map(r => r.key));
-  for (const name of c.watchVillages) {
-    const v = await OasisService.findVillage(name).catch(() => null);
-    if (!v) continue;
+  for (const v of villages) {
     // 10 movements per page: every page, as long as there is a next one.
     for (let p = 1; p <= MAX_OUTGOING_PAGES; p++) {
-      await pause(c.pageGapSeconds);
+      await pause(cfg().pageGapSeconds);
       const html = await page('GET', '/build.php?newdid=' + v.id + '&gid=16&tt=1&filter=2&subfilters=4' + (p > 1 ? '&page=' + p : ''));
       for (const key of outgoingTargets(html)) busy.add(key);
       if (!html.includes('page=' + (p + 1))) break;
     }
   }
-  log.onTheirWay = busy.size;
+  return busy;
+}
 
-  // 2. Troops at home.
-  await pause(c.pageGapSeconds);
-  let home = available(await page('GET', '/build.php?newdid=' + village.id + '&gid=16&tt=2'), slot);
-  log.home = home;
-
-  // 3. Animals of the free oases of the first stages.
+// Free oases of the village's first `stages` stages, not raided now, with what the map block
+// shows: [{ x, y, stage, distance, bonus, animals }]. Oases found taken are remembered.
+async function candidates(village, stages, busy) {
+  const scan = await OasisService.scan(village);
   const taken = OasisService.loadTaken();
-  const candidates = stages.flatMap(s => s.oases.map(o => ({ ...o, stage: s.stage })))
+  const list = scan.stages.filter(s => s.stage <= stages).flatMap(s => s.oases.map(o => ({ ...o, stage: s.stage })))
     .filter(o => !taken[o.x + '|' + o.y] && !busy.has(o.x + '|' + o.y));
-  const smallest = Math.min(...Object.values(c.perStage));
-  let targets = [];
-  if (home >= smallest && candidates.length) {
+  if (!list.length) return [];
+  await pause(cfg().pageGapSeconds);
+  const tiles = await blocksFor(village, list.map(o => o.x + '|' + o.y));
+  const out = [];
+  const nowTaken = [];
+  for (const o of list) {
+    const t = tiles.get(o.x + '|' + o.y);
+    if (!t) continue;
+    const info = OasisService.oasisOf(t);
+    if (!info || !info.free) {
+      if (info) nowTaken.push(info);
+      continue;
+    }
+    out.push({ ...o, animals: OasisService.parseAnimals(t.text) });
+  }
+  if (nowTaken.length) OasisService.recordTaken(nowTaken);
+  return out;
+}
+
+// [{ oasis, army, plan? }] for a village in mode 'empty'.
+async function planEmpty(v, home, oases, log) {
+  const chosen = [];
+  let left = home[v.unit] || 0;
+  for (const o of oases.filter(o => !o.animals.length)) {
+    const n = v.perStage[o.stage];
+    if (n && left >= n) {
+      chosen.push({ oasis: o, army: { [v.unit]: n } });
+      left -= n;
+    }
+  }
+  if (!chosen.length) return chosen;
+  // The map block may lag: check one, and all chosen if it differs.
+  const pick = chosen[Math.floor(Math.random() * chosen.length)];
+  await pause(cfg().pageGapSeconds);
+  const tile = await OasisService.tileAnimals(pick.oasis.x, pick.oasis.y);
+  log.check = { key: pick.oasis.x + '|' + pick.oasis.y, same: !tile.taken && !tile.animals.length };
+  if (log.check.same) return chosen;
+  const ok = [];
+  for (const c of chosen) {
+    await pause(cfg().pageGapSeconds);
+    const t = c === pick ? tile : await OasisService.tileAnimals(c.oasis.x, c.oasis.y);
+    if (t.taken) OasisService.recordTaken([c.oasis]);
+    else if (!t.animals.length) ok.push(c);
+  }
+  return ok;
+}
+
+// [{ oasis, army, plan }] for a village in mode 'animals'.
+async function planAnimals(v, village, home, oases, log) {
+  const chosen = RaidPlanService.plan(village, oases.filter(o => o.animals.length), home)
+    .map(({ oasis, plan }) => ({ oasis, army: plan.army, plan }));
+  if (!chosen.length) return chosen;
+  const pick = chosen[Math.floor(Math.random() * chosen.length)];
+  await pause(cfg().pageGapSeconds);
+  const tile = await OasisService.tileAnimals(pick.oasis.x, pick.oasis.y);
+  log.check = { key: pick.oasis.x + '|' + pick.oasis.y, same: !tile.taken && OasisService.sameAnimals(tile.animals, pick.oasis.animals) };
+  if (tile.taken) OasisService.recordTaken([pick.oasis]);
+  return log.check.same ? chosen : []; // the map block lags: next round
+}
+
+async function round() {
+  const c = cfg();
+  const log = { at: new Date().toISOString(), dryRun: !c.send, villages: {} };
+  if (state.stopped) {
+    log.stopped = true;
+    state.lastRound = log;
+    writeState();
+    return log;
+  }
+  // 1. Troops at home.
+  const villages = [];
+  for (const v of c.villages) {
+    const village = await OasisService.findVillage(v.name).catch(() => null);
+    if (!village) continue;
     await pause(c.pageGapSeconds);
-    const tiles = await blocksFor(village, candidates.map(o => o.x + '|' + o.y));
-    const nowTaken = [];
-    for (const o of candidates) {
-      const t = tiles.get(o.x + '|' + o.y);
-      if (!t) continue;
-      const info = OasisService.oasisOf(t);
-      if (!info || !info.free) {
-        if (info) nowTaken.push(info);
-        continue;
-      }
-      if (!OasisService.parseAnimals(t.text).length) targets.push(o);
-    }
-    if (nowTaken.length) OasisService.recordTaken(nowTaken);
-    // 4. Closest first, as long as troops last.
-    const chosen = [];
-    let left = home;
-    for (const o of targets) {
-      const n = c.perStage[o.stage];
-      if (left >= n) {
-        chosen.push({ ...o, n });
-        left -= n;
-      }
-    }
-    // The map block may lag: check one, and all chosen if it differs.
-    if (chosen.length) {
-      const pick = chosen[Math.floor(Math.random() * chosen.length)];
-      await pause(c.pageGapSeconds);
-      const tile = await OasisService.tileAnimals(pick.x, pick.y);
-      log.check = { key: pick.x + '|' + pick.y, empty: !tile.taken && !tile.animals.length };
-      if (!log.check.empty) {
-        const ok = [];
-        for (const o of chosen) {
-          await pause(c.pageGapSeconds);
-          const t = o === pick ? tile : await OasisService.tileAnimals(o.x, o.y);
-          if (t.taken) OasisService.recordTaken([o]);
-          else if (!t.animals.length) ok.push(o);
+    const form = await page('GET', '/build.php?newdid=' + village.id + '&gid=16&tt=2');
+    const home = Object.fromEntries(Object.entries(SLOTS).map(([u, slot]) => [u, available(form, slot)]));
+    const enough = v.mode === 'empty'
+      ? (home[v.unit] || 0) >= Math.min(...Object.values(v.perStage))
+      : home.u61 + home.u62 >= RaidPlanService.INF_MIN || home.u64 + home.u65 + home.u66 >= RaidPlanService.CAV_MIN;
+    log.villages[v.name] = { mode: v.mode, home };
+    villages.push({ v, village, home, enough });
+  }
+  // 2.-4. Plan and send, village after village.
+  if (villages.some(x => x.enough)) {
+    const busy = await onTheirWay(villages.map(x => x.village));
+    log.onTheirWay = busy.size;
+    for (const { v, village, home, enough } of villages) {
+      if (!enough) continue;
+      const vlog = log.villages[v.name];
+      const oases = await candidates(village, v.stages, busy);
+      const chosen = v.mode === 'empty' ? await planEmpty(v, home, oases, vlog) : await planAnimals(v, village, home, oases, vlog);
+      vlog.targets = chosen.map(t => ({ key: t.oasis.x + '|' + t.oasis.y, army: t.army }));
+      vlog.sent = [];
+      for (const t of chosen) {
+        const key = t.oasis.x + '|' + t.oasis.y;
+        if (!c.send) continue;
+        await pause(c.sendGapSeconds);
+        try {
+          const arrival = await sendRaid(village, key, t.army);
+          busy.add(key);
+          state.raids.push({
+            key, village: village.name, mode: v.mode, stage: t.oasis.stage, army: t.army, sentAt: Date.now(), arrival,
+            animals: Object.fromEntries(t.oasis.animals.map(a => [a.unit, a.count])),
+            predicted: t.plan ? { deaths: t.plan.deaths, lostRes: Math.round(t.plan.lostRes), gain: t.plan.gain } : null,
+          });
+          vlog.sent.push(key);
+        } catch (e) {
+          vlog.error = key + ': ' + e.message;
+          sails.log.warn('autoraid: ' + village.name + ' send to ' + key + ' failed: ' + e.message);
+          break;
         }
-        chosen.splice(0, chosen.length, ...ok);
       }
-    }
-    targets = chosen;
-  }
-  log.targets = targets.map(o => ({ key: o.x + '|' + o.y, stage: o.stage, distance: o.distance, n: o.n }));
-
-  // 4. Send (or only log).
-  log.sent = [];
-  for (const o of targets) {
-    const key = o.x + '|' + o.y;
-    if (!c.send) continue;
-    await pause(c.sendGapSeconds);
-    try {
-      const arrival = await sendRaid(village, key, o.n, slot);
-      state.raids.push({ key, village: village.name, n: o.n, unit: c.unit, stage: o.stage, sentAt: Date.now(), arrival });
-      log.sent.push(key);
-      home -= o.n;
-    } catch (e) {
-      log.error = key + ': ' + e.message;
-      sails.log.warn('autoraid: send to ' + key + ' failed: ' + e.message);
-      break;
+      writeState();
     }
   }
-  writeState();
-
   // 5. Reports.
   try {
     if (c.send) log.reportsRead = await readReports();
@@ -357,8 +414,8 @@ async function round() {
   }
   state.lastRound = log;
   writeState();
-  sails.log.info('autoraid: ' + (c.send ? '' : 'DRY RUN ') + village.name + ' home ' + log.home + ', on their way ' + log.onTheirWay
-    + ', ' + (c.send ? 'sent ' + log.sent.length : 'would send ' + log.targets.length) + ' (' + log.targets.map(t => t.key + ' ' + t.n).join(', ') + ')'
+  sails.log.info('autoraid: ' + (c.send ? '' : 'DRY RUN ') + Object.entries(log.villages).map(([name, v]) =>
+    name + ' ' + (v.targets ? (c.send ? 'sent ' + v.sent.length : 'would send ' + v.targets.length) : 'too few at home')).join(', ')
     + ', reports read ' + (log.reportsRead || 0));
   return log;
 }
@@ -376,27 +433,34 @@ async function loop() {
   }
 }
 
-// Totals of the reports read, per stage of the raided oasis (from the raids sent here).
-function stats() {
-  const stageOf = key => (state.raids.find(r => r.key === key) || {}).stage || null;
-  const byStage = {};
-  for (const r of state.reports) {
-    const s = stageOf(r.key) || 'other';
-    const b = byStage[s] = byStage[s] || { reports: 0, bounty: 0, heroBonus: 0, deadUnits: 0, withAnimals: 0 };
-    b.reports++;
-    b.bounty += r.bounty;
-    b.heroBonus += r.heroBonus;
-    b.deadUnits += Object.values(r.dead).reduce((a, n) => a + n, 0);
-    if (Object.keys(r.found).length) b.withAnimals++;
+// How the raids with a report turned out, per mode: predicted against real losses, kill bonus,
+// loot.
+function evaluation() {
+  const byMode = {};
+  for (const raid of state.raids) {
+    const report = raid.reportId && state.reports.find(r => r.id === raid.reportId);
+    if (!report) continue;
+    const m = byMode[raid.mode || 'empty'] = byMode[raid.mode || 'empty'] || {
+      raids: 0, predictedDead: 0, dead: 0, lostRes: 0, heroBonus: 0, loot: 0, foundMoreAnimals: 0,
+    };
+    const units = r => Object.values(r || {}).reduce((s, n) => s + n, 0);
+    m.raids++;
+    m.predictedDead += units(raid.predicted && raid.predicted.deaths);
+    m.dead += units(report.dead);
+    m.lostRes += Object.entries(report.dead).reduce((s, [u, n]) => s + n * RaidPlanService.B.UNITS[u].cost, 0);
+    m.heroBonus += report.heroBonus;
+    m.loot += report.bounty;
+    if (units(report.found) > units(raid.animals)) m.foundMoreAnimals++;
   }
-  return byStage;
+  return byMode;
 }
 
 module.exports = {
   start: function () {
     if (!cfg().enabled) return;
     readState();
-    sails.log.info('autoraid: on for ' + cfg().village + (cfg().send ? '' : ' (DRY RUN, nothing is sent)'));
+    sails.log.info('autoraid: on for ' + cfg().villages.map(v => v.name + ' (' + v.mode + ')').join(', ')
+      + (cfg().send ? '' : ' (DRY RUN, nothing is sent)') + (state.stopped ? ', STOPPED until /start' : ''));
     loop();
   },
 
@@ -406,21 +470,35 @@ module.exports = {
     return OasisService.serial(round);
   },
 
+  // /stop and /start: no sends until started again (rounds then only note that they are stopped).
+  stop: function () {
+    state.stopped = true;
+    writeState();
+    sails.log.info('autoraid: stopped');
+  },
+  resume: function () {
+    state.stopped = false;
+    writeState();
+    sails.log.info('autoraid: started');
+  },
+
   status: function () {
     return {
       enabled: cfg().enabled,
       send: cfg().send,
-      village: cfg().village,
+      stopped: state.stopped,
+      villages: cfg().villages,
       lastRound: state.lastRound,
       raidsSent: state.raids.length,
       onTheirWay: state.raids.filter(r => r.arrival && r.arrival * 1000 > Date.now()).length,
       reportsRead: state.reports.length,
-      byStage: stats(),
+      evaluation: evaluation(),
       lastReports: state.reports.slice(-10),
     };
   },
 
   backfillReports,
+  sendRaid,
   parseReport,
   outgoingTargets,
   available,

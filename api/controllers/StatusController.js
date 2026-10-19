@@ -5,7 +5,10 @@
  * GET|POST /mute      start the quiet time now: no call for ?h= hours (default callCooldownHours,
  *                     at most MAX_MUTE_HOURS).
  * GET|POST /unmute    end the quiet time, so the next new attack rings again.
- * Both public as https://avogames.com/mute and /unmute (nginx), no key - asked for that way.
+ * GET|POST /stop     no more auto raids (AutoRaidService) until /start.
+ * GET|POST /start    auto raids go on.
+ * All four public as https://avogames.com/mute, /unmute, /stop, /start (nginx), no key - asked
+ * for that way.
  * Answered with a small page, as they are opened from the phone's browser.
  */
 
@@ -29,6 +32,18 @@ module.exports = {
     if (req.method === 'POST') return res.json({ ok: true, quietUntil: until });
     const local = new Date(until).toLocaleString('en-GB', { timeZone: sails.config.travian.timezone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     return page(res, 'Alarms are off until ' + local + '.');
+  },
+
+  stopRaids: function (req, res) {
+    AutoRaidService.stop();
+    if (req.method === 'POST') return res.json({ ok: true, stopped: true });
+    return page(res, 'Auto raids are stopped. Open /start to go on.');
+  },
+
+  startRaids: function (req, res) {
+    AutoRaidService.resume();
+    if (req.method === 'POST') return res.json({ ok: true, stopped: false });
+    return page(res, 'Auto raids are on again.');
   },
 
   unmute: function (req, res) {

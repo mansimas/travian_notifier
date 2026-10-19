@@ -5,5 +5,9 @@ module.exports.routes = {
   'GET /mute': 'StatusController.mute',
   'POST /mute': 'StatusController.mute',
   'GET /unmute': 'StatusController.unmute',
+  'GET /stop': 'StatusController.stopRaids',
+  'POST /stop': 'StatusController.stopRaids',
+  'GET /start': 'StatusController.startRaids',
+  'POST /start': 'StatusController.startRaids',
   'POST /unmute': 'StatusController.unmute',
 };
