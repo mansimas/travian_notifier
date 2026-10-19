@@ -4,7 +4,7 @@
  * Armies for oases with animals, by the rules the player set (2026-10-19):
  *  - only the animals there now count (no respawn on the way);
  *  - infantry (Mercenary, Bowman) first: trips of at most MAX_INF_HOURS, crop oases first, then
- *    the closest; the smallest army from INF_MIN up whose losses stay within INF_LOSS of the
+ *    the closest; the smallest army from INF_MIN up whose losses stay within INF_LOSS (70%) of the
  *    kill bonus; until fewer than INF_MIN are left;
  *  - then cavalry (Steppe Rider, Marksman, Marauder as one mixed group, at least CAV_MIN): never
  *    into crop oases, only where animals weak against horses outweigh the strong ones 4:1
@@ -26,7 +26,7 @@ const INF = ['u61', 'u62'];
 const CAV = { strongFirst: ['u66', 'u64', 'u65'], cheapFirst: ['u64', 'u65', 'u66'] };
 const INF_MIN = 200;
 const CAV_MIN = 30;
-const INF_LOSS = 0.3;
+const INF_LOSS = 0.7;
 const CAV_LOSS = 0.2;
 const MAX_INF_HOURS = 2;
 const MIN_GAIN = 1000;
