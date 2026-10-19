@@ -476,7 +476,7 @@ async function round() {
   }
   state.lastRound = log;
   writeState();
-  sails.log.info('autoraid: ' + (c.send ? '' : 'DRY RUN ') + Object.entries(log.villages).map(([name, v]) =>
+  sails.log.verbose('autoraid: ' + (c.send ? '' : 'DRY RUN ') + Object.entries(log.villages).map(([name, v]) =>
     name + ' ' + (v.targets ? (c.send ? 'sent ' + v.sent.length : 'would send ' + v.targets.length) : 'too few at home')).join(', ')
     + ', reports read ' + (log.reportsRead || 0));
   return log;
@@ -521,7 +521,7 @@ module.exports = {
   start: function () {
     if (!cfg().enabled) return;
     readState();
-    sails.log.info('autoraid: on for ' + cfg().villages.map(v => v.name + ' (' + v.mode + ')').join(', ')
+    sails.log.verbose('autoraid: on for ' + cfg().villages.map(v => v.name + ' (' + v.mode + ')').join(', ')
       + (cfg().send ? '' : ' (DRY RUN, nothing is sent)') + (state.stopped ? ', STOPPED until /start' : ''));
     loop();
   },
@@ -536,12 +536,12 @@ module.exports = {
   stop: function () {
     state.stopped = true;
     writeState();
-    sails.log.info('autoraid: stopped');
+    sails.log.verbose('autoraid: stopped');
   },
   resume: function () {
     state.stopped = false;
     writeState();
-    sails.log.info('autoraid: started');
+    sails.log.verbose('autoraid: started');
   },
 
   status: function () {

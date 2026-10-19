@@ -81,7 +81,7 @@ function recordTaken(list) {
   }
   fs.mkdirSync(path.dirname(TAKEN_FILE), { recursive: true });
   fs.writeFileSync(TAKEN_FILE, JSON.stringify(taken, null, 1));
-  if (added) sails.log.info('oases: ' + added + ' newly seen taken');
+  if (added) sails.log.verbose('oases: ' + added + ' newly seen taken');
   return taken;
 }
 
@@ -253,7 +253,7 @@ async function scan(village, { fresh = false } = {}) {
   const result = await scanBlocks(village);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(result, null, 1));
-  sails.log.info('oases: scanned ' + village.name + ', ' + result.counts.free + ' free / ' + result.counts.occupied + ' taken');
+  sails.log.verbose('oases: scanned ' + village.name + ', ' + result.counts.free + ' free / ' + result.counts.occupied + ' taken');
   return result;
 }
 
