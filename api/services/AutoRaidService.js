@@ -14,7 +14,7 @@
  *       left over one stage more is loaded and planned again, up to maxStages; if the check
  *       differs, every chosen oasis is asked one by one and the plan made again;
  *  4. the raids are sent, with what was planned (for the evaluation in /autoraid);
- *  5. unread oasis raid reports are opened and matched to the raids sent.
+ *  5. the newest oasis raid reports (read or not) are kept and matched to the raids sent.
  * With send off (dry run) step 4 only logs what it would send, and step 5 is left out.
  * Kept in .tmp/autoraid.json: raids sent, reports read, stopped or not, the last round.
  */
@@ -196,24 +196,43 @@ function parseReport(html, id) {
   };
 }
 
-// Opens the unread oasis raid reports (which marks them read) and keeps their results.
+// The newest oasis raid reports, read or not (you may have opened them in the browser): up to
+// REPORT_PAGES pages, until a page holds only reports already kept. A report the backfill saved
+// is taken from its file instead of being opened again.
+const REPORT_PAGES = 3;
+
 async function readReports() {
-  const list = await page('GET', '/report/offensive');
-  const rows = [...list.matchAll(/<tr>\s*<td class="sel">[\s\S]*?<\/tr>/g)].map(m => m[0])
-    .filter(r => r.includes('messageStatusUnread') && /raids Unoccupied oasis/.test(plain(r)));
+  let history = [];
+  try { history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')); } catch (e) { /* no backfill yet */ }
+  const saved = new Map(history.map(r => [r.id, r]));
+  const have = new Set(state.reports.map(r => r.id));
   let read = 0;
-  for (const row of rows.slice(0, MAX_REPORTS_PER_ROUND)) {
-    const href = (row.match(/href="\?(id=[^"]+)"/) || [])[1];
-    if (!href) continue;
-    const id = decodeURIComponent(href.replace(/&amp;/g, '&').match(/id=([^&]+)/)[1]);
-    if (state.reports.some(r => r.id === id)) continue;
-    await pause(cfg().pageGapSeconds);
-    const report = parseReport(await page('GET', '/report?' + href.replace(/&amp;/g, '&')), id);
-    if (report) {
+  for (let p = 1; p <= REPORT_PAGES; p++) {
+    if (p > 1) await pause(cfg().pageGapSeconds);
+    const list = await page('GET', '/report/offensive' + (p > 1 ? '?page=' + p : ''));
+    const rows = [...list.matchAll(/<tr>\s*<td class="sel">[\s\S]*?<\/tr>/g)].map(m => m[0])
+      .filter(r => /raids Unoccupied oasis/.test(plain(r)));
+    let fresh = 0;
+    for (const row of rows) {
+      const href = (row.match(/href="\?(id=[^"]+)"/) || [])[1];
+      if (!href) continue;
+      const query = href.replace(/&amp;/g, '&');
+      const id = decodeURIComponent(query.match(/id=([^&]+)/)[1]);
+      if (have.has(id)) continue;
+      fresh++;
+      let report = saved.get(id);
+      if (!report) {
+        if (read >= MAX_REPORTS_PER_ROUND) break;
+        await pause(cfg().pageGapSeconds);
+        report = parseReport(await page('GET', '/report?' + query), id);
+        read++;
+      }
+      if (!report) continue;
       state.reports.push(report);
+      have.add(id);
       matchReport(report);
-      read++;
     }
+    if (!fresh || !/class="next"/.test(list)) break;
   }
   return read;
 }
@@ -221,7 +240,8 @@ async function readReports() {
 // The raid this report belongs to: same oasis, village and army, the earliest without one.
 function matchReport(report) {
   const same = (a, b) => Object.keys({ ...a, ...b }).every(u => (a[u] || 0) === (b[u] || 0));
-  const raid = state.raids.find(r => !r.reportId && r.key === report.key && r.village === report.village && r.army && same(r.army, report.sent));
+  const armyOf = r => r.army || (r.unit ? { [r.unit]: r.n } : null); // first raids kept unit and n
+  const raid = state.raids.find(r => !r.reportId && r.key === report.key && r.village === report.village && armyOf(r) && same(armyOf(r), report.sent));
   if (raid) raid.reportId = report.id;
 }
 
