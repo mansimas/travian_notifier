@@ -9,7 +9,8 @@
  *     map blocks; one chosen oasis is checked against tile-details:
  *     - mode 'empty': empty oases, closest first, perStage[stage] Mercenaries each, as long as
  *       that many are at home; all chosen ones are checked if the first differs;
- *     - mode 'animals': oases with animals, armies by RaidPlanService; with 30 or more horses
+ *     - mode 'animals': oases with animals, armies by RaidPlanService (cavOnly: the horses
+ *       alone, going on with the oases the entries before left over); with 30 or more horses
  *       left over one stage more is loaded and planned again, up to maxStages; if the check
  *       differs, every chosen oasis is asked one by one and the plan made again;
  *  4. the raids are sent, with what was planned (for the evaluation in /autoraid);
@@ -370,18 +371,24 @@ async function round() {
     writeState();
     return log;
   }
-  // 1. Troops at home.
+  // 1. Troops at home (one look per village, also when it has two entries).
   const villages = [];
+  const homes = {};
   for (const v of c.villages) {
     const village = await OasisService.findVillage(v.name).catch(() => null);
     if (!village) continue;
-    await pause(c.pageGapSeconds);
-    const form = await page('GET', '/build.php?newdid=' + village.id + '&gid=16&tt=2');
-    const home = Object.fromEntries(Object.entries(SLOTS).map(([u, slot]) => [u, available(form, slot)]));
+    if (!homes[v.name]) {
+      await pause(c.pageGapSeconds);
+      const form = await page('GET', '/build.php?newdid=' + village.id + '&gid=16&tt=2');
+      homes[v.name] = Object.fromEntries(Object.entries(SLOTS).map(([u, slot]) => [u, available(form, slot)]));
+    }
+    // cavOnly: this entry raids with the horses alone (infantry has its own entry).
+    const home = v.cavOnly ? { ...homes[v.name], u61: 0, u62: 0 } : homes[v.name];
     const enough = v.mode === 'empty'
       ? (home[v.unit] || 0) >= Math.min(...Object.values(v.perStage))
       : home.u61 + home.u62 >= RaidPlanService.INF_MIN || home.u64 + home.u65 + home.u66 >= RaidPlanService.CAV_MIN;
-    log.villages[v.name] = { mode: v.mode, home };
+    v.label = v.name + (v.cavOnly ? ' horses' : '');
+    log.villages[v.label] = { mode: v.mode, home };
     villages.push({ v, village, home, enough });
   }
   // 2.-4. Plan and send, village after village.
@@ -390,7 +397,7 @@ async function round() {
     log.onTheirWay = busy.size;
     for (const { v, village, home, enough } of villages) {
       if (!enough) continue;
-      const vlog = log.villages[v.name];
+      const vlog = log.villages[v.label];
       let oases = await candidates(village, 1, v.stages, busy);
       if (v.mode === 'animals') {
         // 30 or more horses left over: one stage more and plan again, up to maxStages.
@@ -411,6 +418,7 @@ async function round() {
         ...(t.plan ? { dead: t.plan.totalDeaths, gain: t.plan.gain, lost: Math.round(t.plan.lostRes) } : {}),
       }));
       vlog.sent = [];
+      for (const t of chosen) busy.add(t.oasis.x + '|' + t.oasis.y); // later entries go on with the next oases
       for (const t of chosen) {
         const key = t.oasis.x + '|' + t.oasis.y;
         if (!c.send) continue;

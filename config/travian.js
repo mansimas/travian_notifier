@@ -29,7 +29,8 @@ module.exports.travian = {
 
   // Auto raids (AutoRaidService): every minMinutes..maxMinutes (random) each village raids
   // oases of its first stages as long as troops last. Mode 'empty': Mercenaries to empty oases,
-  // perStage[stage] each. Mode 'animals': oases with animals, armies by RaidPlanService.
+  // perStage[stage] each. Mode 'animals': oases with animals, armies by RaidPlanService;
+  // cavOnly: with the horses alone. Entries go in this order, each on the oases left over.
   // AUTO_RAID_SEND=0 = dry run: everything is read and logged, nothing is sent and no report
   // is opened. GET /stop and /start pause and resume the sends.
   autoRaid: {
@@ -38,6 +39,8 @@ module.exports.travian = {
     villages: [
       { name: 'mansim1', mode: 'empty', unit: 'u61', stages: 4, perStage: { 1: 50, 2: 50, 3: 100, 4: 100 } },
       { name: 'mansim2', mode: 'animals', stages: 8, maxStages: 10 },
+      // mansim1's horses go on where mansim2's horses ran out.
+      { name: 'mansim1', mode: 'animals', cavOnly: true, stages: 8, maxStages: 10 },
     ],
     minMinutes: 1,
     maxMinutes: 5,
