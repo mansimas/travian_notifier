@@ -461,7 +461,7 @@ async function round() {
           vlog.sent.push(key);
         } catch (e) {
           vlog.error = key + ': ' + e.message;
-          sails.log.warn('autoraid: ' + village.name + ' send to ' + key + ' failed: ' + e.message);
+          sails.log.error('autoraid: ' + village.name + ' send to ' + key + ' failed: ' + e.message);
           break;
         }
       }
