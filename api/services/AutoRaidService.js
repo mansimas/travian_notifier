@@ -10,7 +10,7 @@
  *  4. one raid per empty oasis, closest first: perStage[stage] Mercenaries, as long as that
  *     many are at home (the rest stays home);
  *  5. unread oasis raid reports are opened and their results kept for /autoraid.
- * With send off (dry run) step 4 only logs what it would send.
+ * With send off (dry run) step 4 only logs what it would send, and step 5 is left out.
  * Kept in .tmp/autoraid.json: raids sent, reports read, the last round.
  */
 const fs = require('fs');
@@ -304,7 +304,7 @@ async function round() {
 
   // 5. Reports.
   try {
-    log.reportsRead = await readReports();
+    if (c.send) log.reportsRead = await readReports();
   } catch (e) {
     log.reportsError = e.message;
   }
