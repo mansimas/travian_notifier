@@ -9,8 +9,9 @@
  *  - then cavalry (Steppe Rider, Marksman, Marauder as one mixed group, at least CAV_MIN): never
  *    into crop oases, only where animals weak against horses outweigh the strong ones 1.5:1
  *    (points per animal), losses within CAV_LOSS (CAV_LOSS_WEAK_ONLY where every animal is weak
- *    against horses: rat, spider, boar, wolf); the army with the most profit per troop-hour,
- *    best oases first;
+ *    against horses: rat, spider, boar, wolf), or at most one horse lost (then also where the
+ *    1.5:1 test fails); per oasis the army with the most profit per troop-hour; the oases that
+ *    return the most (kill bonus + loot - losses) first;
  *  - an oasis that is not crop and fails the 1.5:1 test is not raided at all;
  *  - nor one whose kill bonus is under MIN_GAIN: not worth the troops' time.
  * Battles are simulated with lib/battle.js, a copy of the browser plugin's simulator.
@@ -55,8 +56,9 @@ function fill(left, order, total) {
   return total > 0 ? null : army;
 }
 
-// Best army of one kind against an oasis, or null. village: { x, y }.
-function planKind(village, o, left, kind) {
+// Best army of one kind against an oasis, or null. village: { x, y }. oneLossOnly: only armies
+// that lose at most one unit count.
+function planKind(village, o, left, kind, oneLossOnly) {
   if (B.simulate({ u66: 1e6 }, o.animals).gain < MIN_GAIN) return null; // the bonus does not depend on the army
   const distance = Math.hypot(wrap(o.x - village.x), wrap(o.y - village.y));
   const hoursOf = army => distance / Math.min(...Object.keys(army).map(u => B.UNITS[u].speed));
@@ -73,9 +75,10 @@ function planKind(village, o, left, kind) {
       const r = B.simulate(army, o.animals);
       if (!r.win) continue;
       const net = r.gain + (kind === 'cav' ? Math.min(LOOT, r.carry || Infinity) : 0) - r.lostRes;
-      if (net <= 0 || r.lostRes > lossLimit * r.gain) continue;
+      const oneLoss = kind === 'cav' && r.totalDeaths <= 1; // one horse lost is fine anyway
+      if (net <= 0 || (oneLossOnly && !oneLoss) || (!oneLoss && r.lostRes > lossLimit * r.gain)) continue;
       const plan = {
-        army, kind, hours, distance,
+        army, kind, hours, distance, net,
         deaths: Object.fromEntries(Object.entries(r.deaths || {}).filter(([, d]) => d > 0)),
         totalDeaths: r.totalDeaths, lostRes: r.lostRes, gain: r.gain,
         rate: net / (cost(army) * 2 * Math.max(hours, 0.25)),
@@ -105,11 +108,14 @@ function plan(village, oases, troops) {
     const p = planKind(village, o, left, 'inf');
     if (p) take(o, p);
   }
-  const cavOrder = allowed.filter(o => !used.has(o) && !isCrop(o))
-    .map(o => ({ o, rate: (planKind(village, o, left, 'cav') || { rate: -1 }).rate }))
-    .sort((a, b) => b.rate - a.rate);
+  // Horses: where the 1.5:1 test passes, or failing it, at most one horse lost. Most return first.
+  const cavPlan = o => planKind(village, o, left, 'cav', !cavAllowed(o.animals));
+  const cavOrder = oases.filter(o => !used.has(o) && !isCrop(o))
+    .map(o => ({ o, net: (cavPlan(o) || { net: -Infinity }).net }))
+    .filter(x => x.net > -Infinity)
+    .sort((a, b) => b.net - a.net);
   for (const { o } of cavOrder) {
-    const p = planKind(village, o, left, 'cav');
+    const p = cavPlan(o);
     if (p) take(o, p);
   }
   return out;
