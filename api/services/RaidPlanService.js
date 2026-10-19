@@ -10,7 +10,8 @@
  *    into crop oases, only where animals weak against horses outweigh the strong ones 4:1
  *    (points per animal), losses within CAV_LOSS; the army with the most profit per troop-hour,
  *    best oases first;
- *  - an oasis that is not crop and fails the 4:1 test is not raided at all.
+ *  - an oasis that is not crop and fails the 4:1 test is not raided at all;
+ *  - nor one whose kill bonus is under MIN_GAIN: not worth the troops' time.
  * Battles are simulated with lib/battle.js, a copy of the browser plugin's simulator.
  */
 const fs = require('fs');
@@ -28,6 +29,7 @@ const CAV_MIN = 30;
 const INF_LOSS = 0.3;
 const CAV_LOSS = 0.2;
 const MAX_INF_HOURS = 2;
+const MIN_GAIN = 1000;
 const LOOT = 1300; // typical loot per raid (real reports), counted in the cavalry profit only
 const WEAK_VS_CAV = { u31: 1, u32: 2, u35: 5, u36: 7 };
 const STRONG_VS_CAV = { u33: 3, u34: 4, u37: 10, u38: 20, u39: 15, u40: 20 };
@@ -52,6 +54,7 @@ function fill(left, order, total) {
 
 // Best army of one kind against an oasis, or null. village: { x, y }.
 function planKind(village, o, left, kind) {
+  if (B.simulate({ u66: 1e6 }, o.animals).gain < MIN_GAIN) return null; // the bonus does not depend on the army
   const distance = Math.hypot(wrap(o.x - village.x), wrap(o.y - village.y));
   const hoursOf = army => distance / Math.min(...Object.keys(army).map(u => B.UNITS[u].speed));
   const orders = kind === 'inf' ? [INF] : [CAV.strongFirst, CAV.cheapFirst];
