@@ -14,7 +14,8 @@
  *       left over one stage more is loaded and planned again, up to maxStages; if the check
  *       differs, every chosen oasis is asked one by one and the plan made again;
  *  4. the raids are sent, with what was planned (for the evaluation in /autoraid);
- *  5. the newest oasis raid reports (read or not) are kept and matched to the raids sent.
+ *  5. the newest oasis raid reports (read or not) are kept and matched to the raids sent; the
+ *     ones that were unread are marked unread again, so you still see them as new in the game.
  * With send off (dry run) step 4 only logs what it would send, and step 5 is left out.
  * Kept in .tmp/autoraid.json: raids sent, reports read, stopped or not, the last round.
  */
@@ -196,11 +197,27 @@ function parseReport(html, id) {
   };
 }
 
+// Marks these reports (ids as "221576689|f5f28980") unread again, as the list's read/unread
+// toggle does. Opening a report marks it read; this puts back what the player has not seen yet.
+async function markUnread(ids) {
+  if (!ids.length) return;
+  const send = () => TravianService.request('PUT', '/api/v1/report/update-status', {
+    body: JSON.stringify({ ids: ids.map(id => id.split('|')[0]), status: 'unread' }),
+    headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' },
+  });
+  let res = await send();
+  if (res.status >= 300) {
+    await TravianService.login();
+    res = await send();
+  }
+  if (res.status >= 300) sails.log.error('autoraid: marking ' + ids.length + ' reports unread failed (HTTP ' + res.status + ')');
+}
+
 // The newest oasis raid reports, read or not (you may have opened them in the browser), back to
 // the last one kept: page after page (up to REPORT_PAGES) until a page holds only reports already
 // kept. At most MAX_REPORTS_PER_ROUND are opened; the rest waits for the next round, which then
 // pages past the kept ones (state.reportBacklog). A report the backfill saved is taken from its
-// file instead of being opened again.
+// file instead of being opened again. Reports that were unread are marked unread again.
 const REPORT_PAGES = 20;
 
 async function readReports() {
@@ -210,35 +227,41 @@ async function readReports() {
   const have = new Set(state.reports.map(r => r.id));
   let read = 0;
   let capped = false;
-  for (let p = 1; p <= REPORT_PAGES && !capped; p++) {
-    if (p > 1) await pause(cfg().pageGapSeconds);
-    const list = await page('GET', '/report/offensive' + (p > 1 ? '?page=' + p : ''));
-    const rows = [...list.matchAll(/<tr>\s*<td class="sel">[\s\S]*?<\/tr>/g)].map(m => m[0])
-      .filter(r => /raids Unoccupied oasis/.test(plain(r)));
-    let fresh = 0;
-    for (const row of rows) {
-      const href = (row.match(/href="\?(id=[^"]+)"/) || [])[1];
-      if (!href) continue;
-      const query = href.replace(/&amp;/g, '&');
-      const id = decodeURIComponent(query.match(/id=([^&]+)/)[1]);
-      if (have.has(id)) continue;
-      fresh++;
-      let report = saved.get(id);
-      if (!report) {
-        if (read >= MAX_REPORTS_PER_ROUND) {
-          capped = true;
-          break;
+  const unread = [];
+  try {
+    for (let p = 1; p <= REPORT_PAGES && !capped; p++) {
+      if (p > 1) await pause(cfg().pageGapSeconds);
+      const list = await page('GET', '/report/offensive' + (p > 1 ? '?page=' + p : ''));
+      const rows = [...list.matchAll(/<tr>\s*<td class="sel">[\s\S]*?<\/tr>/g)].map(m => m[0])
+        .filter(r => /raids Unoccupied oasis/.test(plain(r)));
+      let fresh = 0;
+      for (const row of rows) {
+        const href = (row.match(/href="\?(id=[^"]+)"/) || [])[1];
+        if (!href) continue;
+        const query = href.replace(/&amp;/g, '&');
+        const id = decodeURIComponent(query.match(/id=([^&]+)/)[1]);
+        if (have.has(id)) continue;
+        fresh++;
+        let report = saved.get(id);
+        if (!report) {
+          if (read >= MAX_REPORTS_PER_ROUND) {
+            capped = true;
+            break;
+          }
+          await pause(cfg().pageGapSeconds);
+          if (/messageStatusUnread/.test(row)) unread.push(id);
+          report = parseReport(await page('GET', '/report?' + query), id);
+          read++;
         }
-        await pause(cfg().pageGapSeconds);
-        report = parseReport(await page('GET', '/report?' + query), id);
-        read++;
+        if (!report) continue;
+        state.reports.push(report);
+        have.add(id);
+        matchReport(report);
       }
-      if (!report) continue;
-      state.reports.push(report);
-      have.add(id);
-      matchReport(report);
+      if ((!fresh && !state.reportBacklog) || !/class="next"/.test(list)) break;
     }
-    if ((!fresh && !state.reportBacklog) || !/class="next"/.test(list)) break;
+  } finally {
+    await markUnread(unread);
   }
   state.reportBacklog = capped;
   return read;
@@ -255,6 +278,7 @@ function matchReport(report) {
 // Every oasis raid report still in the game (read or not), page by page, one request every
 // gapSeconds (random), into .tmp/report-history.json. Reports already there are not opened
 // again, so it can stop and go on later. Its own file: the running app writes autoraid.json.
+// Reports that were unread are marked unread again, page by page.
 const HISTORY_FILE = path.join(process.cwd(), '.tmp', 'report-history.json');
 
 async function backfillReports({ gapSeconds = [3, 6], maxPages = 200 } = {}) {
@@ -266,28 +290,35 @@ async function backfillReports({ gapSeconds = [3, 6], maxPages = 200 } = {}) {
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
   };
   let pages = 0, added = 0;
-  for (let p = 1; p <= maxPages; p++) {
-    if (p > 1) await pause(gapSeconds);
-    const list = await page('GET', '/report/offensive?page=' + p);
-    pages++;
-    const rows = [...list.matchAll(/<tr>\s*<td class="sel">[\s\S]*?<\/tr>/g)].map(m => m[0])
-      .filter(r => /raids Unoccupied oasis/.test(plain(r)));
-    for (const row of rows) {
-      const href = (row.match(/href="\?(id=[^"]+)"/) || [])[1];
-      if (!href) continue;
-      const query = href.replace(/&amp;/g, '&');
-      const id = decodeURIComponent(query.match(/id=([^&]+)/)[1]);
-      if (have.has(id)) continue;
-      await pause(gapSeconds);
-      const report = parseReport(await page('GET', '/report?' + query), id);
-      if (!report) continue;
-      history.push(report);
-      have.add(id);
-      added++;
-      save();
+  const unread = [];
+  try {
+    for (let p = 1; p <= maxPages; p++) {
+      if (p > 1) await pause(gapSeconds);
+      const list = await page('GET', '/report/offensive?page=' + p);
+      pages++;
+      const rows = [...list.matchAll(/<tr>\s*<td class="sel">[\s\S]*?<\/tr>/g)].map(m => m[0])
+        .filter(r => /raids Unoccupied oasis/.test(plain(r)));
+      for (const row of rows) {
+        const href = (row.match(/href="\?(id=[^"]+)"/) || [])[1];
+        if (!href) continue;
+        const query = href.replace(/&amp;/g, '&');
+        const id = decodeURIComponent(query.match(/id=([^&]+)/)[1]);
+        if (have.has(id)) continue;
+        await pause(gapSeconds);
+        if (/messageStatusUnread/.test(row)) unread.push(id);
+        const report = parseReport(await page('GET', '/report?' + query), id);
+        if (!report) continue;
+        history.push(report);
+        have.add(id);
+        added++;
+        save();
+      }
+      await markUnread(unread.splice(0));
+      sails.log.info('reports backfill: page ' + p + ', ' + added + ' new, ' + history.length + ' in all');
+      if (!/class="next"/.test(list)) break;
     }
-    sails.log.info('reports backfill: page ' + p + ', ' + added + ' new, ' + history.length + ' in all');
-    if (!/class="next"/.test(list)) break;
+  } finally {
+    await markUnread(unread);
   }
   save();
   return { pages, added, total: history.length };
