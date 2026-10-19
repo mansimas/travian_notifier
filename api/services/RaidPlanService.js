@@ -8,7 +8,8 @@
  *    kill bonus; until fewer than INF_MIN are left;
  *  - then cavalry (Steppe Rider, Marksman, Marauder as one mixed group, at least CAV_MIN): never
  *    into crop oases, only where animals weak against horses outweigh the strong ones 1.5:1
- *    (points per animal), losses within CAV_LOSS; the army with the most profit per troop-hour,
+ *    (points per animal), losses within CAV_LOSS (CAV_LOSS_WEAK_ONLY where every animal is weak
+ *    against horses: rat, spider, boar, wolf); the army with the most profit per troop-hour,
  *    best oases first;
  *  - an oasis that is not crop and fails the 1.5:1 test is not raided at all;
  *  - nor one whose kill bonus is under MIN_GAIN: not worth the troops' time.
@@ -28,6 +29,7 @@ const INF_MIN = 200;
 const CAV_MIN = 30;
 const INF_LOSS = 0.7;
 const CAV_LOSS = 0.2;
+const CAV_LOSS_WEAK_ONLY = 0.4; // no animal strong against horses there at all
 const MAX_INF_HOURS = 2;
 const MIN_GAIN = 1000;
 const LOOT = 1300; // typical loot per raid (real reports), counted in the cavalry profit only
@@ -59,6 +61,7 @@ function planKind(village, o, left, kind) {
   const distance = Math.hypot(wrap(o.x - village.x), wrap(o.y - village.y));
   const hoursOf = army => distance / Math.min(...Object.keys(army).map(u => B.UNITS[u].speed));
   const orders = kind === 'inf' ? [INF] : [CAV.strongFirst, CAV.cheapFirst];
+  const lossLimit = kind === 'inf' ? INF_LOSS : points(o.animals, STRONG_VS_CAV) ? CAV_LOSS : CAV_LOSS_WEAK_ONLY;
   let best = null;
   for (const order of orders) {
     const have = order.reduce((s, u) => s + (left[u] || 0), 0);
@@ -70,7 +73,7 @@ function planKind(village, o, left, kind) {
       const r = B.simulate(army, o.animals);
       if (!r.win) continue;
       const net = r.gain + (kind === 'cav' ? Math.min(LOOT, r.carry || Infinity) : 0) - r.lostRes;
-      if (net <= 0 || r.lostRes > (kind === 'inf' ? INF_LOSS : CAV_LOSS) * r.gain) continue;
+      if (net <= 0 || r.lostRes > lossLimit * r.gain) continue;
       const plan = {
         army, kind, hours, distance,
         deaths: Object.fromEntries(Object.entries(r.deaths || {}).filter(([, d]) => d > 0)),
