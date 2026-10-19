@@ -9,8 +9,9 @@
  *     map blocks; one chosen oasis is checked against tile-details:
  *     - mode 'empty': empty oases, closest first, perStage[stage] Mercenaries each, as long as
  *       that many are at home; all chosen ones are checked if the first differs;
- *     - mode 'animals': oases with animals, armies by RaidPlanService; nothing is sent this
- *       round if the check differs (the map block lags);
+ *     - mode 'animals': oases with animals, armies by RaidPlanService; with 30 or more horses
+ *       left over one stage more is loaded and planned again, up to maxStages; if the check
+ *       differs, every chosen oasis is asked one by one and the plan made again;
  *  4. the raids are sent, with what was planned (for the evaluation in /autoraid);
  *  5. unread oasis raid reports are opened and matched to the raids sent.
  * With send off (dry run) step 4 only logs what it would send, and step 5 is left out.
@@ -283,12 +284,12 @@ async function onTheirWay(villages) {
   return busy;
 }
 
-// Free oases of the village's first `stages` stages, not raided now, with what the map block
-// shows: [{ x, y, stage, distance, bonus, animals }]. Oases found taken are remembered.
-async function candidates(village, stages, busy) {
+// Free oases of the village's stages from..to, not raided now, with what the map block shows:
+// [{ x, y, stage, distance, bonus, animals }]. Oases found taken are remembered.
+async function candidates(village, from, to, busy) {
   const scan = await OasisService.scan(village);
   const taken = OasisService.loadTaken();
-  const list = scan.stages.filter(s => s.stage <= stages).flatMap(s => s.oases.map(o => ({ ...o, stage: s.stage })))
+  const list = scan.stages.filter(s => s.stage >= from && s.stage <= to).flatMap(s => s.oases.map(o => ({ ...o, stage: s.stage })))
     .filter(o => !taken[o.x + '|' + o.y] && !busy.has(o.x + '|' + o.y));
   if (!list.length) return [];
   await pause(cfg().pageGapSeconds);
@@ -390,7 +391,19 @@ async function round() {
     for (const { v, village, home, enough } of villages) {
       if (!enough) continue;
       const vlog = log.villages[v.name];
-      const oases = await candidates(village, v.stages, busy);
+      let oases = await candidates(village, 1, v.stages, busy);
+      if (v.mode === 'animals') {
+        // 30 or more horses left over: one stage more and plan again, up to maxStages.
+        const cavHome = home.u64 + home.u65 + home.u66;
+        vlog.stages = v.stages;
+        while (vlog.stages < v.maxStages) {
+          const used = RaidPlanService.plan(village, oases.filter(o => o.animals.length), home)
+            .reduce((s, { plan }) => s + (plan.kind === 'cav' ? Object.values(plan.army).reduce((a, n) => a + n, 0) : 0), 0);
+          if (cavHome - used < RaidPlanService.CAV_MIN) break;
+          vlog.stages++;
+          oases = oases.concat(await candidates(village, vlog.stages, vlog.stages, busy));
+        }
+      }
       const chosen = v.mode === 'empty' ? await planEmpty(v, home, oases, vlog) : await planAnimals(v, village, home, oases, vlog);
       vlog.targets = chosen.map(t => ({
         key: t.oasis.x + '|' + t.oasis.y, stage: t.oasis.stage, distance: t.oasis.distance, army: t.army,

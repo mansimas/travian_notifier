@@ -37,7 +37,7 @@ module.exports.travian = {
     send: process.env.AUTO_RAID_SEND !== '0',
     villages: [
       { name: 'mansim1', mode: 'empty', unit: 'u61', stages: 4, perStage: { 1: 50, 2: 50, 3: 100, 4: 100 } },
-      { name: 'mansim2', mode: 'animals', stages: 8 },
+      { name: 'mansim2', mode: 'animals', stages: 8, maxStages: 10 },
     ],
     minMinutes: 1,
     maxMinutes: 5,
