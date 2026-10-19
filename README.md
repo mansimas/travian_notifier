@@ -45,11 +45,12 @@ On the server:
 nginx, inside the `listen 443` server block of `/etc/nginx/sites-available/avogames.com`, next to `location /`:
 
 ```nginx
-      location ~ ^/(mute|unmute)$ {
+      location ~ ^/(mute|unmute|stop|start)$ {
           proxy_pass http://127.0.0.1:1421;   # travian_notifier (pm2: "TravianNotifier")
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
       }
 ```
+- Auto raids (`AUTO_RAID=1`, villages and rules in `config/travian.js`): https://avogames.com/stop stops them, https://avogames.com/start starts them again. `curl -s localhost:1421/autoraid` shows the last round and how the raids turned out.
 - `pm2 logs TravianNotifier` shows the log.
 
 Locally, `node app.js` lifts without watching. Use `WATCH=1 node app.js` to watch for real.
