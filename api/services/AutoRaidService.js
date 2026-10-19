@@ -7,8 +7,9 @@
  *  2. outgoing troops of all those villages: an oasis with a raid on its way gets no other;
  *  3. the never-owned oases of each village's first stages (OasisService scan), animals from
  *     map blocks; one chosen oasis is checked against tile-details:
- *     - mode 'empty': empty oases, closest first, perStage[stage] Mercenaries each, as long as
- *       that many are at home; all chosen ones are checked if the first differs;
+ *     - mode 'empty': empty oases our last raid hit at least restMinutes ago, closest first,
+ *       perStage[stage] Mercenaries each, as long as that many are at home; all chosen ones are
+ *       checked if the first differs;
  *     - mode 'animals': oases with animals, armies by RaidPlanService (cavOnly: the horses
  *       alone, going on with the oases the entries before left over); with 30 or more horses
  *       left over one stage more is loaded and planned again, up to maxStages; if the check
@@ -369,11 +370,21 @@ async function candidates(village, from, to, busy) {
   return out;
 }
 
-// [{ oasis, army, plan? }] for a village in mode 'empty'.
+// When our last raid (any mode) hit each oasis: key -> arrival in ms.
+function lastHits() {
+  const hits = {};
+  for (const r of state.raids) if (r.arrival) hits[r.key] = Math.max(hits[r.key] || 0, r.arrival * 1000);
+  return hits;
+}
+
+// [{ oasis, army, plan? }] for a village in mode 'empty'. Oases hit less than restMinutes ago are
+// left to fill up again, so the raids spread over the further stages.
 async function planEmpty(v, home, oases, log) {
   const chosen = [];
   let left = home[v.unit] || 0;
-  for (const o of oases.filter(o => !o.animals.length)) {
+  const hits = lastHits();
+  const rested = o => Date.now() - (hits[o.x + '|' + o.y] || 0) >= (v.restMinutes || 0) * MINUTE;
+  for (const o of oases.filter(o => !o.animals.length && rested(o))) {
     const n = v.perStage[o.stage];
     if (n && left >= n) {
       chosen.push({ oasis: o, army: { [v.unit]: n } });

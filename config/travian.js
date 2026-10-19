@@ -37,7 +37,8 @@ module.exports.travian = {
     enabled: process.env.AUTO_RAID === '1',
     send: process.env.AUTO_RAID_SEND !== '0',
     villages: [
-      { name: 'mansim1', mode: 'empty', unit: 'u61', stages: 4, perStage: { 1: 50, 2: 50, 3: 100, 4: 100 } },
+      // restMinutes: an oasis gets no empty raid until this long after our last raid hit it.
+      { name: 'mansim1', mode: 'empty', unit: 'u61', stages: 5, perStage: { 1: 50, 2: 50, 3: 100, 4: 100, 5: 100 }, restMinutes: 60 },
       { name: 'mansim2', mode: 'animals', stages: 8, maxStages: 10 },
       // mansim1's horses go on where mansim2's horses ran out.
       { name: 'mansim1', mode: 'animals', cavOnly: true, stages: 8, maxStages: 10 },
