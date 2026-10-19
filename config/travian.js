@@ -43,7 +43,7 @@ module.exports.travian = {
       { name: 'mansim1', mode: 'animals', cavOnly: true, stages: 8, maxStages: 10 },
     ],
     minMinutes: 1,
-    maxMinutes: 5,
+    maxMinutes: 3,
     // Pause between two sends of one round, and between other page loads.
     sendGapSeconds: [2, 6],
     pageGapSeconds: [1, 3],
