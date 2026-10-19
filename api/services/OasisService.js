@@ -87,11 +87,11 @@ function recordTaken(list) {
 
 const requestBlock = (x, y) => api('map/position', { data: { x, y, zoomLevel: ZOOM_LEVEL, ignorePositions: [] } });
 
-// Villages with coordinates, from dorf1.php: [{ name, x, y }].
+// Villages with coordinates, from dorf1.php: [{ id, name, x, y }].
 async function villages() {
   const { viewData } = await TravianService.read();
   const list = (viewData.ownPlayer.villageList || []).flatMap(entry => entry.villages || [entry]);
-  return list.map(v => ({ name: v.name, x: v.x, y: v.y }));
+  return list.map(v => ({ id: v.id, name: v.name, x: v.x, y: v.y }));
 }
 
 // The village by name (any case), or the first one.
@@ -331,4 +331,12 @@ module.exports = {
 
   parseAnimals,
   oasisOf,
+  serial,
+  scan,
+  findVillage,
+  requestBlock,
+  tileAnimals,
+  recordTaken,
+  loadTaken,
+  sameAnimals,
 };

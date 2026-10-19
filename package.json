@@ -10,7 +10,8 @@
     "check": "node scripts/run.js check",
     "test-call": "node scripts/run.js test-call",
     "test-alarm": "node scripts/run.js test-alarm",
-    "oases": "node scripts/run.js oases"
+    "oases": "node scripts/run.js oases",
+    "autoraid": "node scripts/run.js autoraid"
   },
   "repository": {
     "type": "git",

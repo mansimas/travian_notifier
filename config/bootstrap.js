@@ -9,6 +9,7 @@ module.exports.bootstrap = function (cb) {
     if (master && sails.config.travian.watch) {
       sails.log.info('lifted on master, watching for attacks');
       NotifierService.start();
+      AutoRaidService.start();
     } else {
       sails.log.info('lifted, watcher off');
     }

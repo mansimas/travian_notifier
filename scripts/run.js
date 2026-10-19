@@ -5,6 +5,7 @@
  *   npm run test-alarm  the full alarm: several calls, as an attack rings it
  *   npm run oases -- [stage] [village] [fresh]
  *                       animals of one oasis stage (1 = closest), saves .tmp/oases-<x>_<y>.json
+ *   npm run autoraid    one auto raid round now (a dry run unless AUTO_RAID_SEND=1)
  * Loads sails without the http server, so it does not clash with the running app.
  */
 process.chdir(require('path').join(__dirname, '..'));
@@ -32,6 +33,10 @@ const commands = {
   'test-alarm': async function () {
     await PhoneService.alarm('Travian alarm test. Your village is under attack. Wake up.');
     console.log('alarm done');
+  },
+  autoraid: async function () {
+    const log = await AutoRaidService.round();
+    console.log(JSON.stringify(log, null, 1));
   },
   oases: async function () {
     const args = process.argv.slice(3);

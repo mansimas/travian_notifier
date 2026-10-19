@@ -27,6 +27,24 @@ module.exports.travian = {
   // the first village when not set).
   oasisVillage: process.env.OASIS_VILLAGE,
 
+  // Auto raids (AutoRaidService): every minMinutes..maxMinutes (random) the village sends
+  // Mercenaries to the empty never-owned oases of the first stages, closest first, as long as
+  // troops last. send false = dry run: everything is read and logged, nothing is sent.
+  autoRaid: {
+    enabled: process.env.AUTO_RAID === '1',
+    send: process.env.AUTO_RAID_SEND === '1',
+    village: process.env.AUTO_RAID_VILLAGE || 'mansim1',
+    // Villages whose outgoing troops are checked, so no oasis gets a second raid.
+    watchVillages: (process.env.AUTO_RAID_WATCH || 'mansim1,mansim2').split(',').map(s => s.trim()).filter(Boolean),
+    unit: 'u61', // Mercenary
+    perStage: { 1: 50, 2: 50, 3: 100, 4: 100 },
+    minMinutes: 1,
+    maxMinutes: 10,
+    // Pause between two sends of one round, and between other page loads.
+    sendGapSeconds: [2, 6],
+    pageGapSeconds: [1, 3],
+  },
+
   // Times on the /mute page are shown in this zone.
   timezone: process.env.TIMEZONE || 'Europe/Vilnius',
 

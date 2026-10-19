@@ -153,4 +153,4 @@ async function read() {
   return { html, viewData, villages, active, movements: parseMovements(html) };
 }
 
-module.exports = { Problem, request, login, read, parseViewData, parseVillages, parseMovements };
+module.exports = { Problem, request, login, loggedIn, read, parseViewData, parseVillages, parseMovements };
