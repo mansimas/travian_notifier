@@ -12,8 +12,8 @@
  *    against horses: rat, spider, boar, wolf), or at most one horse lost (then also where the
  *    1.5:1 test fails); per oasis the army with the most profit per troop-hour; the oases that
  *    return the most (kill bonus + loot - losses) first;
- *  - an oasis that is not crop and fails the 1.5:1 test is not raided at all;
- *  - nor one whose kill bonus is under MIN_GAIN: not worth the troops' time.
+ *  - the 1.5:1 test only keeps horses out: infantry may raid any oasis;
+ *  - no oasis whose kill bonus is under MIN_GAIN: not worth the troops' time.
  * Battles are simulated with lib/battle.js, a copy of the browser plugin's simulator.
  */
 const fs = require('fs');
@@ -102,8 +102,7 @@ function plan(village, oases, troops) {
     used.add(o);
   };
   const distance = o => Math.hypot(wrap(o.x - village.x), wrap(o.y - village.y));
-  const allowed = oases.filter(o => isCrop(o) || cavAllowed(o.animals));
-  for (const o of [...allowed].sort((a, b) => (isCrop(b) - isCrop(a)) || distance(a) - distance(b))) {
+  for (const o of [...oases].sort((a, b) => (isCrop(b) - isCrop(a)) || distance(a) - distance(b))) {
     if (INF.reduce((s, u) => s + (left[u] || 0), 0) < INF_MIN) break;
     const p = planKind(village, o, left, 'inf');
     if (p) take(o, p);
