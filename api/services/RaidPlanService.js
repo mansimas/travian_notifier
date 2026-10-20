@@ -10,7 +10,7 @@
  *    for the oasis' stage: 40 / 60 / 80 / 100 / 120 / 140 / 160 per two stages, 2026-10-20):
  *    never into crop oases, nor into an oasis our raids hit less than horseRestMinutes ago
  *    (o.resting: it refills on the way), only where the points of the animals weak against horses are at least
- *    CAV_RATIO_AT_MAX (2) times the points of the strong ones; losses within CAV_LOSS (50%) of
+ *    CAV_RATIO_AT_MAX (2) times the points of the strong ones; losses within cavLoss(n) of
  *    the kill bonus, with no exception (2026-10-20: raids planned to lose more, by the old
  *    one-loss rule, lost resources overall); per oasis the army with the most profit per
  *    troop-hour, or below CAV_RATIO (5) times the smallest army that fits (up to CAV_MAX, so a
@@ -44,7 +44,8 @@ const CAV_MIN_BY_STAGE = { 1: 40, 2: 40, 3: 60, 4: 60, 5: 80, 6: 80, 7: 100, 8: 
 const cavMin = stage => CAV_MIN_BY_STAGE[stage] || CAV_MIN;
 const CAV_MAX = 600; // no bigger horse group (2026-10-20)
 const INF_LOSS = 0.7;
-const CAV_LOSS = 0.5;
+// Share of the kill bonus a horse group of n may lose (2026-10-20): over 400 50%, 200-400 40%, under 200 30%.
+const cavLoss = n => (n > 400 ? 0.5 : n >= 200 ? 0.4 : 0.3);
 const MAX_INF_HOURS = 2;
 const EXTRA_INF_HOURS = 4;
 const EXTRA_CAV_GROWTH = 1.2;
@@ -85,7 +86,6 @@ function planKind(village, o, left, kind, maxInfHours = MAX_INF_HOURS) {
   const distance = Math.hypot(wrap(o.x - village.x), wrap(o.y - village.y));
   const hoursOf = army => distance / Math.min(...Object.keys(army).map(u => B.UNITS[u].speed));
   const orders = kind === 'inf' ? [INF] : [CAV.strongFirst, CAV.cheapFirst];
-  const lossLimit = kind === 'inf' ? INF_LOSS : CAV_LOSS;
   let best = null;
   for (const order of orders) {
     const have = order.reduce((s, u) => s + (left[u] || 0), 0);
@@ -98,7 +98,7 @@ function planKind(village, o, left, kind, maxInfHours = MAX_INF_HOURS) {
       const r = B.simulate(army, o.animals);
       if (!r.win) continue;
       const net = r.gain + (kind === 'cav' ? Math.min(LOOT, r.carry || Infinity) : 0) - r.lostRes;
-      if (net <= 0 || r.lostRes > lossLimit * r.gain) continue;
+      if (net <= 0 || r.lostRes > (kind === 'inf' ? INF_LOSS : cavLoss(n)) * r.gain) continue;
       const plan = {
         army, kind, hours, distance, net,
         deaths: Object.fromEntries(Object.entries(r.deaths || {}).filter(([, d]) => d > 0)),
