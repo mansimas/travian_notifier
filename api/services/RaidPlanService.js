@@ -10,16 +10,18 @@
  *    for the oasis' stage: 30 / 40 / 50 / 60 / 80 per two stages, 2026-10-20): never
  *    into crop oases, only where animals weak against horses outweigh the strong ones 1.5:1
  *    (points per animal), losses within CAV_LOSS (CAV_LOSS_WEAK_ONLY where every animal is weak
- *    against horses: rat, spider, boar, wolf), or at most one horse lost (then also where the
- *    1.5:1 test fails); per oasis the army with the most profit per troop-hour; the oases that
- *    return the most (kill bonus + loot - losses) first;
+ *    against horses: rat, spider, boar, wolf) or at most one horse lost; per oasis the army with
+ *    the most profit per troop-hour; the oases that return the most (kill bonus + loot - losses)
+ *    first;
+ *  - the 1.5:1 test comes first for horses, in every pass, with no exception (2026-10-20: 252
+ *    horses went at 1 rat + 2 elephants because only one loss was predicted; 8 elephants were
+ *    there by arrival, 9 horses died);
  *  - the 1.5:1 test only keeps horses out: infantry may raid any oasis;
  *  - no oasis whose kill bonus is under MIN_GAIN: not worth the troops' time;
  *  - no horse group over CAV_MAX; a group of CAV_MAX may lose up to CAV_LOSS_AT_MAX of the bonus.
  * Troops left after that get a second pass (2026-10-20) over the oases still free: infantry trips
  * up to EXTRA_INF_HOURS, cavalry armies grown by EXTRA_CAV_GROWTH per stage band beyond stage 4
- * (stages 5-6 x1.2, 7-8 x1.44, 9-10 x1.728) and losses up to EXTRA_CAV_LOSS; if that finds no oasis for the horses, once more
- * without the 1.5:1 test.
+ * (stages 5-6 x1.2, 7-8 x1.44, 9-10 x1.728) and losses up to EXTRA_CAV_LOSS.
  * Battles are simulated with lib/battle.js, a copy of the browser plugin's simulator.
  */
 const fs = require('fs');
@@ -70,10 +72,10 @@ function fill(left, order, total) {
   return total > 0 ? null : army;
 }
 
-// Best army of one kind against an oasis, or null. village: { x, y }. oneLossOnly: only armies
-// that lose at most one unit count. maxInfHours: longest infantry trip. minCavLoss: the cavalry
-// loss limit is at least this.
-function planKind(village, o, left, kind, oneLossOnly, maxInfHours = MAX_INF_HOURS, minCavLoss = 0) {
+// Best army of one kind against an oasis, or null. village: { x, y }. maxInfHours: longest
+// infantry trip. minCavLoss: the cavalry loss limit is at least this.
+function planKind(village, o, left, kind, maxInfHours = MAX_INF_HOURS, minCavLoss = 0) {
+  if (kind === 'cav' && !cavAllowed(o.animals)) return null; // ratio first, always
   if (B.simulate({ u66: 1e6 }, o.animals).gain < MIN_GAIN) return null; // the bonus does not depend on the army
   const distance = Math.hypot(wrap(o.x - village.x), wrap(o.y - village.y));
   const hoursOf = army => distance / Math.min(...Object.keys(army).map(u => B.UNITS[u].speed));
@@ -93,7 +95,7 @@ function planKind(village, o, left, kind, oneLossOnly, maxInfHours = MAX_INF_HOU
       const net = r.gain + (kind === 'cav' ? Math.min(LOOT, r.carry || Infinity) : 0) - r.lostRes;
       const oneLoss = kind === 'cav' && r.totalDeaths <= 1; // one horse lost is fine anyway
       const capped = kind === 'cav' && n >= CAV_MAX && r.lostRes <= CAV_LOSS_AT_MAX * r.gain;
-      if (net <= 0 || (!capped && ((oneLossOnly && !oneLoss) || (!oneLoss && r.lostRes > lossLimit * r.gain)))) continue;
+      if (net <= 0 || (!capped && !oneLoss && r.lostRes > lossLimit * r.gain)) continue;
       const plan = {
         army, kind, hours, distance, net,
         deaths: Object.fromEntries(Object.entries(r.deaths || {}).filter(([, d]) => d > 0)),
@@ -139,14 +141,14 @@ function plan(village, oases, troops, { extra = true } = {}) {
     for (const o of [...oases].sort((a, b) => (isCrop(b) - isCrop(a)) || distance(a) - distance(b))) {
       if (INF.reduce((s, u) => s + (left[u] || 0), 0) < INF_MIN) break;
       if (used.has(o)) continue;
-      const p = planKind(village, o, left, 'inf', false, maxHours);
+      const p = planKind(village, o, left, 'inf', maxHours);
       if (p) take(o, { ...p, pass });
     }
   };
-  // Horses: where the 1.5:1 test passes, or failing it, at most one horse lost. Most return first.
-  const cavPass = (pass, noRatio) => {
+  // Horses: only where the 1.5:1 test passes. Most return first.
+  const cavPass = pass => {
     const cavPlan = o => {
-      const p = planKind(village, o, left, 'cav', !noRatio && !cavAllowed(o.animals), MAX_INF_HOURS, pass > 1 ? EXTRA_CAV_LOSS : 0);
+      const p = planKind(village, o, left, 'cav', MAX_INF_HOURS, pass > 1 ? EXTRA_CAV_LOSS : 0);
       return p && (pass > 1 ? grow(o, p, left) : p);
     };
     const cavOrder = oases.filter(o => !used.has(o) && !isCrop(o))
@@ -165,8 +167,7 @@ function plan(village, oases, troops, { extra = true } = {}) {
   if (!extra) return out;
   // Second pass for the troops still at home.
   infPass(EXTRA_INF_HOURS, 2);
-  const cavLeft = () => CAV.cheapFirst.reduce((s, u) => s + (left[u] || 0), 0);
-  if (cavLeft() >= CAV_MIN && !cavPass(2) && cavLeft() >= CAV_MIN) cavPass(2, true);
+  if (CAV.cheapFirst.reduce((s, u) => s + (left[u] || 0), 0) >= CAV_MIN) cavPass(2);
   return out;
 }
 
