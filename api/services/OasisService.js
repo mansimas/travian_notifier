@@ -38,8 +38,10 @@ const scanFile = village => path.join(process.cwd(), '.tmp', 'oases-' + village.
 let running = null; // the job in progress, so two never run at once
 
 function serial(job) {
-  const next = (running || Promise.resolve()).catch(() => {}).then(job);
-  running = next.finally(() => { if (running === next) running = null; });
+  const next = (running || Promise.resolve()).then(job);
+  // The queue itself never rejects: the caller handles next's error, the queue only waits for it.
+  const done = next.catch(() => {}).then(() => { if (running === done) running = null; });
+  running = done;
   return next;
 }
 
