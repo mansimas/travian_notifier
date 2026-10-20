@@ -8,17 +8,18 @@
  *    kill bonus; until fewer than INF_MIN are left;
  *  - then cavalry (Steppe Rider, Marksman, Marauder as one mixed group, at least CAV_MIN_BY_STAGE
  *    for the oasis' stage: 30 / 40 / 50 / 60 / 80 per two stages, 2026-10-20): never
- *    into crop oases, only where animals weak against horses outweigh the strong ones 1.5:1
- *    (points per animal), losses within CAV_LOSS (CAV_LOSS_WEAK_ONLY where every animal is weak
+ *    into crop oases, only where the points of the animals weak against horses are at least
+ *    CAV_RATIO (5) times the points of the strong ones, or CAV_RATIO_AT_MAX (3) times for a
+ *    full group (CAV_MAX, or every horse left when fewer); losses within CAV_LOSS (CAV_LOSS_WEAK_ONLY where every animal is weak
  *    against horses: rat, spider, boar, wolf) or at most one horse lost; per oasis the army with
  *    the most profit per troop-hour; the oases that return the most (kill bonus + loot - losses)
  *    first;
- *  - the 1.5:1 test comes first for horses, in every pass, with no exception (2026-10-20: 252
+ *  - the points test comes first for horses, in every pass, with no exception (2026-10-20: 252
  *    horses went at 1 rat + 2 elephants because only one loss was predicted; 8 elephants were
  *    there by arrival, 9 horses died);
- *  - the 1.5:1 test only keeps horses out: infantry may raid any oasis;
+ *  - the points test only keeps horses out: infantry may raid any oasis;
  *  - no oasis whose kill bonus is under MIN_GAIN: not worth the troops' time;
- *  - no horse group over CAV_MAX; a group of CAV_MAX may lose up to CAV_LOSS_AT_MAX of the bonus.
+ *  - no horse group over CAV_MAX; a full group may lose up to CAV_LOSS_AT_MAX of the bonus.
  * Troops left after that get a second pass (2026-10-20) over the oases still free: infantry trips
  * up to EXTRA_INF_HOURS, cavalry armies grown by EXTRA_CAV_GROWTH per stage band beyond stage 4
  * (stages 5-6 x1.2, 7-8 x1.44, 9-10 x1.728) and losses up to EXTRA_CAV_LOSS.
@@ -40,7 +41,7 @@ const CAV_MIN = 30;
 const CAV_MIN_BY_STAGE = { 1: 30, 2: 30, 3: 40, 4: 40, 5: 50, 6: 50, 7: 60, 8: 60, 9: 80, 10: 80 };
 const cavMin = stage => CAV_MIN_BY_STAGE[stage] || CAV_MIN;
 const CAV_MAX = 600; // no bigger horse group (2026-10-20)
-const CAV_LOSS_AT_MAX = 0.5; // a group at CAV_MAX may lose this much, one-loss rule or not
+const CAV_LOSS_AT_MAX = 0.5; // a full group may lose this much, one-loss rule or not
 const INF_LOSS = 0.7;
 const CAV_LOSS = 0.2;
 const CAV_LOSS_WEAK_ONLY = 0.4; // no animal strong against horses there at all
@@ -56,8 +57,12 @@ const MAP_SIZE = 401;
 
 const wrap = v => ((((v + 200) % MAP_SIZE) + MAP_SIZE) % MAP_SIZE) - 200;
 const points = (animals, table) => animals.reduce((s, a) => s + (table[a.unit] || 0) * a.count, 0);
-const CAV_RATIO = 1.5; // weak : strong points at least this
-const cavAllowed = animals => points(animals, WEAK_VS_CAV) >= CAV_RATIO * points(animals, STRONG_VS_CAV);
+// Weak points at least this many times the strong points (2026-10-20): 100 rats + 100 spiders
+// (300) against 1 elephant (40) is 7.5 times, horses may go.
+const CAV_RATIO = 5;
+const CAV_RATIO_AT_MAX = 3; // for a full group
+const ratioAtLeast = (animals, ratio) => points(animals, WEAK_VS_CAV) >= ratio * points(animals, STRONG_VS_CAV);
+const cavAllowed = animals => ratioAtLeast(animals, CAV_RATIO_AT_MAX);
 const isCrop = o => !!(o.bonus && o.bonus.r4);
 const cost = army => Object.entries(army).reduce((s, [u, n]) => s + n * B.UNITS[u].cost, 0);
 
@@ -75,7 +80,8 @@ function fill(left, order, total) {
 // Best army of one kind against an oasis, or null. village: { x, y }. maxInfHours: longest
 // infantry trip. minCavLoss: the cavalry loss limit is at least this.
 function planKind(village, o, left, kind, maxInfHours = MAX_INF_HOURS, minCavLoss = 0) {
-  if (kind === 'cav' && !cavAllowed(o.animals)) return null; // ratio first, always
+  if (kind === 'cav' && !cavAllowed(o.animals)) return null; // points first, always
+  const fullOnly = kind === 'cav' && !ratioAtLeast(o.animals, CAV_RATIO); // between 3 and 5 times: full group only
   if (B.simulate({ u66: 1e6 }, o.animals).gain < MIN_GAIN) return null; // the bonus does not depend on the army
   const distance = Math.hypot(wrap(o.x - village.x), wrap(o.y - village.y));
   const hoursOf = army => distance / Math.min(...Object.keys(army).map(u => B.UNITS[u].speed));
@@ -85,7 +91,7 @@ function planKind(village, o, left, kind, maxInfHours = MAX_INF_HOURS, minCavLos
   for (const order of orders) {
     const have = order.reduce((s, u) => s + (left[u] || 0), 0);
     const top = kind === 'inf' ? have : Math.min(have, CAV_MAX);
-    for (let n = kind === 'inf' ? INF_MIN : cavMin(o.stage); n <= top; n = n < top ? Math.min(top, Math.max(n + 1, Math.round(n * 1.08))) : n + 1) {
+    for (let n = kind === 'inf' ? INF_MIN : fullOnly ? Math.max(top, cavMin(o.stage)) : cavMin(o.stage); n <= top; n = n < top ? Math.min(top, Math.max(n + 1, Math.round(n * 1.08))) : n + 1) {
       const army = fill(left, order, n);
       if (!army) break;
       const hours = hoursOf(army);
@@ -94,7 +100,7 @@ function planKind(village, o, left, kind, maxInfHours = MAX_INF_HOURS, minCavLos
       if (!r.win) continue;
       const net = r.gain + (kind === 'cav' ? Math.min(LOOT, r.carry || Infinity) : 0) - r.lostRes;
       const oneLoss = kind === 'cav' && r.totalDeaths <= 1; // one horse lost is fine anyway
-      const capped = kind === 'cav' && n >= CAV_MAX && r.lostRes <= CAV_LOSS_AT_MAX * r.gain;
+      const capped = kind === 'cav' && n >= top && r.lostRes <= CAV_LOSS_AT_MAX * r.gain;
       if (net <= 0 || (!capped && !oneLoss && r.lostRes > lossLimit * r.gain)) continue;
       const plan = {
         army, kind, hours, distance, net,
@@ -145,7 +151,7 @@ function plan(village, oases, troops, { extra = true } = {}) {
       if (p) take(o, { ...p, pass });
     }
   };
-  // Horses: only where the 1.5:1 test passes. Most return first.
+  // Horses: only where the points test passes. Most return first.
   const cavPass = pass => {
     const cavPlan = o => {
       const p = planKind(village, o, left, 'cav', MAX_INF_HOURS, pass > 1 ? EXTRA_CAV_LOSS : 0);
