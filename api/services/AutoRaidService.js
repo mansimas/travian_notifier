@@ -473,7 +473,7 @@ async function round() {
         const cavHome = home.u64 + home.u65 + home.u66;
         vlog.stages = v.stages;
         while (vlog.stages < v.maxStages) {
-          const used = RaidPlanService.plan(village, oases.filter(o => o.animals.length), home)
+          const used = RaidPlanService.plan(village, oases.filter(o => o.animals.length), home, { extra: false })
             .reduce((s, { plan }) => s + (plan.kind === 'cav' ? Object.values(plan.army).reduce((a, n) => a + n, 0) : 0), 0);
           if (cavHome - used < RaidPlanService.CAV_MIN) break;
           vlog.stages++;
@@ -484,7 +484,7 @@ async function round() {
       vlog.targets = chosen.map(t => ({
         key: t.oasis.x + '|' + t.oasis.y, stage: t.oasis.stage, distance: t.oasis.distance, army: t.army,
         animals: t.oasis.animals.map(a => a.count + ' ' + a.unit).join(', '),
-        ...(t.plan ? { dead: t.plan.totalDeaths, gain: t.plan.gain, lost: Math.round(t.plan.lostRes) } : {}),
+        ...(t.plan ? { pass: t.plan.pass, dead: t.plan.totalDeaths, gain: t.plan.gain, lost: Math.round(t.plan.lostRes) } : {}),
       }));
       vlog.sent = [];
       for (const t of chosen) busy.add(t.oasis.x + '|' + t.oasis.y); // later entries go on with the next oases
