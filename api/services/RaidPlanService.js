@@ -10,12 +10,12 @@
  *    for the oasis' stage: 40 / 60 / 80 / 100 / 120 / 140 / 160 per two stages, 2026-10-20):
  *    never into crop oases, nor into an oasis our raids hit less than horseRestMinutes ago
  *    (o.resting: it refills on the way), only where the points of the animals weak against horses are at least
- *    CAV_RATIO (5) times the points of the strong ones, or CAV_RATIO_AT_MAX (2) times for a
- *    full group (CAV_MAX, or every horse left when fewer); losses within CAV_LOSS (50%) of the
- *    kill bonus, with no exception (2026-10-20: raids planned to lose more, by the old one-loss
- *    rule, lost resources overall); per oasis the army with
- *    the most profit per troop-hour; the oases that return the most (kill bonus + loot - losses)
- *    first;
+ *    CAV_RATIO_AT_MAX (2) times the points of the strong ones; losses within CAV_LOSS (50%) of
+ *    the kill bonus, with no exception (2026-10-20: raids planned to lose more, by the old
+ *    one-loss rule, lost resources overall); per oasis the army with the most profit per
+ *    troop-hour, or below CAV_RATIO (5) times the smallest army that fits (up to CAV_MAX, so a
+ *    full group only when nothing smaller does; 2026-10-20: 600 horses no longer go at 4 boars
+ *    and 1 bear); the oases that return the most (kill bonus + loot - losses) first;
  *  - the points test comes first for horses, in every pass, with no exception (2026-10-20: 252
  *    horses went at 1 rat + 2 elephants because only one loss was predicted; 8 elephants were
  *    there by arrival, 9 horses died);
@@ -59,7 +59,7 @@ const points = (animals, table) => animals.reduce((s, a) => s + (table[a.unit] |
 // Weak points at least this many times the strong points (2026-10-20): 100 rats + 100 spiders
 // (300) against 1 elephant (40) is 7.5 times, horses may go.
 const CAV_RATIO = 5;
-const CAV_RATIO_AT_MAX = 2; // for a full group
+const CAV_RATIO_AT_MAX = 2; // below CAV_RATIO: the smallest army that fits
 const ratioAtLeast = (animals, ratio) => points(animals, WEAK_VS_CAV) >= ratio * points(animals, STRONG_VS_CAV);
 const cavAllowed = animals => ratioAtLeast(animals, CAV_RATIO_AT_MAX);
 const isCrop = o => !!(o.bonus && o.bonus.r4);
@@ -80,7 +80,7 @@ function fill(left, order, total) {
 // infantry trip.
 function planKind(village, o, left, kind, maxInfHours = MAX_INF_HOURS) {
   if (kind === 'cav' && (o.resting || !cavAllowed(o.animals))) return null; // points first, always
-  const fullOnly = kind === 'cav' && !ratioAtLeast(o.animals, CAV_RATIO); // between 3 and 5 times: full group only
+  const smallest = kind === 'inf' || !ratioAtLeast(o.animals, CAV_RATIO); // between 2 and 5 times: the smallest that fits
   if (B.simulate({ u66: 1e6 }, o.animals).gain < MIN_GAIN) return null; // the bonus does not depend on the army
   const distance = Math.hypot(wrap(o.x - village.x), wrap(o.y - village.y));
   const hoursOf = army => distance / Math.min(...Object.keys(army).map(u => B.UNITS[u].speed));
@@ -90,7 +90,7 @@ function planKind(village, o, left, kind, maxInfHours = MAX_INF_HOURS) {
   for (const order of orders) {
     const have = order.reduce((s, u) => s + (left[u] || 0), 0);
     const top = kind === 'inf' ? have : Math.min(have, CAV_MAX);
-    for (let n = kind === 'inf' ? INF_MIN : fullOnly ? Math.max(top, cavMin(o.stage)) : cavMin(o.stage); n <= top; n = n < top ? Math.min(top, Math.max(n + 1, Math.round(n * 1.08))) : n + 1) {
+    for (let n = kind === 'inf' ? INF_MIN : cavMin(o.stage); n <= top; n = n < top ? Math.min(top, Math.max(n + 1, Math.round(n * 1.08))) : n + 1) {
       const army = fill(left, order, n);
       if (!army) break;
       const hours = hoursOf(army);
@@ -106,6 +106,10 @@ function planKind(village, o, left, kind, maxInfHours = MAX_INF_HOURS) {
         rate: net / (cost(army) * 2 * Math.max(hours, 0.25)),
       };
       if (kind === 'inf') return plan; // the smallest that fits
+      if (smallest) { // per horse order, the smaller one wins
+        if (!best || n < Object.values(best.army).reduce((a, k) => a + k, 0)) best = plan;
+        break;
+      }
       if (!best || plan.rate > best.rate) best = plan;
     }
   }
