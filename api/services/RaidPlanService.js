@@ -13,7 +13,8 @@
  *    1.5:1 test fails); per oasis the army with the most profit per troop-hour; the oases that
  *    return the most (kill bonus + loot - losses) first;
  *  - the 1.5:1 test only keeps horses out: infantry may raid any oasis;
- *  - no oasis whose kill bonus is under MIN_GAIN: not worth the troops' time.
+ *  - no oasis whose kill bonus is under MIN_GAIN: not worth the troops' time;
+ *  - no horse group over CAV_MAX; a group of CAV_MAX may lose up to CAV_LOSS_AT_MAX of the bonus.
  * Troops left after that get a second pass (2026-10-20) over the oases still free: infantry trips
  * up to EXTRA_INF_HOURS, cavalry armies grown by EXTRA_CAV_GROWTH per stage band beyond stage 4
  * (stages 5-6 x1.2, 7-8 x1.44, 9-10 x1.728) and losses up to EXTRA_CAV_LOSS; if that finds no oasis for the horses, once more
@@ -32,6 +33,8 @@ const INF = ['u61', 'u62'];
 const CAV = { strongFirst: ['u66', 'u64', 'u65'], cheapFirst: ['u64', 'u65', 'u66'] };
 const INF_MIN = 200;
 const CAV_MIN = 30;
+const CAV_MAX = 600; // no bigger horse group (2026-10-20)
+const CAV_LOSS_AT_MAX = 0.5; // a group at CAV_MAX may lose this much, one-loss rule or not
 const INF_LOSS = 0.7;
 const CAV_LOSS = 0.2;
 const CAV_LOSS_WEAK_ONLY = 0.4; // no animal strong against horses there at all
@@ -75,7 +78,8 @@ function planKind(village, o, left, kind, oneLossOnly, maxInfHours = MAX_INF_HOU
   let best = null;
   for (const order of orders) {
     const have = order.reduce((s, u) => s + (left[u] || 0), 0);
-    for (let n = kind === 'inf' ? INF_MIN : CAV_MIN; n <= have; n = Math.max(n + 1, Math.round(n * 1.08))) {
+    const top = kind === 'inf' ? have : Math.min(have, CAV_MAX);
+    for (let n = kind === 'inf' ? INF_MIN : CAV_MIN; n <= top; n = n < top ? Math.min(top, Math.max(n + 1, Math.round(n * 1.08))) : n + 1) {
       const army = fill(left, order, n);
       if (!army) break;
       const hours = hoursOf(army);
@@ -84,7 +88,8 @@ function planKind(village, o, left, kind, oneLossOnly, maxInfHours = MAX_INF_HOU
       if (!r.win) continue;
       const net = r.gain + (kind === 'cav' ? Math.min(LOOT, r.carry || Infinity) : 0) - r.lostRes;
       const oneLoss = kind === 'cav' && r.totalDeaths <= 1; // one horse lost is fine anyway
-      if (net <= 0 || (oneLossOnly && !oneLoss) || (!oneLoss && r.lostRes > lossLimit * r.gain)) continue;
+      const capped = kind === 'cav' && n >= CAV_MAX && r.lostRes <= CAV_LOSS_AT_MAX * r.gain;
+      if (net <= 0 || (!capped && ((oneLossOnly && !oneLoss) || (!oneLoss && r.lostRes > lossLimit * r.gain)))) continue;
       const plan = {
         army, kind, hours, distance, net,
         deaths: Object.fromEntries(Object.entries(r.deaths || {}).filter(([, d]) => d > 0)),
@@ -103,7 +108,8 @@ function planKind(village, o, left, kind, oneLossOnly, maxInfHours = MAX_INF_HOU
 function grow(o, p, left) {
   const factor = EXTRA_CAV_GROWTH ** Math.max(0, Math.ceil((o.stage || 0) / 2) - 2);
   if (factor === 1) return p;
-  const army = Object.fromEntries(Object.entries(p.army).map(([u, n]) => [u, Math.min(left[u] || 0, Math.ceil(n * factor))]));
+  const grown = Object.fromEntries(Object.entries(p.army).map(([u, n]) => [u, Math.min(left[u] || 0, Math.ceil(n * factor))]));
+  const army = fill(grown, Object.keys(grown), Math.min(CAV_MAX, Object.values(grown).reduce((a, n) => a + n, 0)));
   const r = B.simulate(army, o.animals);
   if (!r.win) return p;
   return {
