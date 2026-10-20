@@ -6,7 +6,8 @@
  *  - infantry (Mercenary, Bowman) first: trips of at most MAX_INF_HOURS, crop oases first, then
  *    the closest; the smallest army from INF_MIN up whose losses stay within INF_LOSS (70%) of the
  *    kill bonus; until fewer than INF_MIN are left;
- *  - then cavalry (Steppe Rider, Marksman, Marauder as one mixed group, at least CAV_MIN): never
+ *  - then cavalry (Steppe Rider, Marksman, Marauder as one mixed group, at least CAV_MIN_BY_STAGE
+ *    for the oasis' stage: 30 / 40 / 50 / 60 / 80 per two stages, 2026-10-20): never
  *    into crop oases, only where animals weak against horses outweigh the strong ones 1.5:1
  *    (points per animal), losses within CAV_LOSS (CAV_LOSS_WEAK_ONLY where every animal is weak
  *    against horses: rat, spider, boar, wolf), or at most one horse lost (then also where the
@@ -33,6 +34,9 @@ const INF = ['u61', 'u62'];
 const CAV = { strongFirst: ['u66', 'u64', 'u65'], cheapFirst: ['u64', 'u65', 'u66'] };
 const INF_MIN = 200;
 const CAV_MIN = 30;
+// Fewer horses lost too many per raid (2-5 each, 2026-10-20): smallest horse group per stage.
+const CAV_MIN_BY_STAGE = { 1: 30, 2: 30, 3: 40, 4: 40, 5: 50, 6: 50, 7: 60, 8: 60, 9: 80, 10: 80 };
+const cavMin = stage => CAV_MIN_BY_STAGE[stage] || CAV_MIN;
 const CAV_MAX = 600; // no bigger horse group (2026-10-20)
 const CAV_LOSS_AT_MAX = 0.5; // a group at CAV_MAX may lose this much, one-loss rule or not
 const INF_LOSS = 0.7;
@@ -79,7 +83,7 @@ function planKind(village, o, left, kind, oneLossOnly, maxInfHours = MAX_INF_HOU
   for (const order of orders) {
     const have = order.reduce((s, u) => s + (left[u] || 0), 0);
     const top = kind === 'inf' ? have : Math.min(have, CAV_MAX);
-    for (let n = kind === 'inf' ? INF_MIN : CAV_MIN; n <= top; n = n < top ? Math.min(top, Math.max(n + 1, Math.round(n * 1.08))) : n + 1) {
+    for (let n = kind === 'inf' ? INF_MIN : cavMin(o.stage); n <= top; n = n < top ? Math.min(top, Math.max(n + 1, Math.round(n * 1.08))) : n + 1) {
       const army = fill(left, order, n);
       if (!army) break;
       const hours = hoursOf(army);
@@ -166,4 +170,4 @@ function plan(village, oases, troops, { extra = true } = {}) {
   return out;
 }
 
-module.exports = { plan, cavAllowed, isCrop, B, INF_MIN, CAV_MIN };
+module.exports = { plan, cavAllowed, isCrop, cavMin, B, INF_MIN, CAV_MIN };

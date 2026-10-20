@@ -469,13 +469,13 @@ async function round() {
       const vlog = log.villages[v.label];
       let oases = await candidates(village, 1, v.stages, busy);
       if (v.mode === 'animals') {
-        // 30 or more horses left over: one stage more and plan again, up to maxStages.
+        // Enough horses left over for the next stage's minimum: one stage more and plan again, up to maxStages.
         const cavHome = home.u64 + home.u65 + home.u66;
         vlog.stages = v.stages;
         while (vlog.stages < v.maxStages) {
           const used = RaidPlanService.plan(village, oases.filter(o => o.animals.length), home, { extra: false })
             .reduce((s, { plan }) => s + (plan.kind === 'cav' ? Object.values(plan.army).reduce((a, n) => a + n, 0) : 0), 0);
-          if (cavHome - used < RaidPlanService.CAV_MIN) break;
+          if (cavHome - used < RaidPlanService.cavMin(vlog.stages + 1)) break;
           vlog.stages++;
           oases = oases.concat(await candidates(village, vlog.stages, vlog.stages, busy));
         }
