@@ -9,7 +9,7 @@
  *  - then cavalry (Steppe Rider, Marksman, Marauder as one mixed group, at least CAV_MIN_BY_STAGE
  *    for the oasis' stage: 30 / 40 / 50 / 60 / 80 per two stages, 2026-10-20): never
  *    into crop oases, only where the points of the animals weak against horses are at least
- *    CAV_RATIO (5) times the points of the strong ones, or CAV_RATIO_AT_MAX (3) times for a
+ *    CAV_RATIO (5) times the points of the strong ones, or CAV_RATIO_AT_MAX (2) times for a
  *    full group (CAV_MAX, or every horse left when fewer); losses within CAV_LOSS (CAV_LOSS_WEAK_ONLY where every animal is weak
  *    against horses: rat, spider, boar, wolf) or at most one horse lost; per oasis the army with
  *    the most profit per troop-hour; the oases that return the most (kill bonus + loot - losses)
@@ -60,7 +60,7 @@ const points = (animals, table) => animals.reduce((s, a) => s + (table[a.unit] |
 // Weak points at least this many times the strong points (2026-10-20): 100 rats + 100 spiders
 // (300) against 1 elephant (40) is 7.5 times, horses may go.
 const CAV_RATIO = 5;
-const CAV_RATIO_AT_MAX = 3; // for a full group
+const CAV_RATIO_AT_MAX = 2; // for a full group
 const ratioAtLeast = (animals, ratio) => points(animals, WEAK_VS_CAV) >= ratio * points(animals, STRONG_VS_CAV);
 const cavAllowed = animals => ratioAtLeast(animals, CAV_RATIO_AT_MAX);
 const isCrop = o => !!(o.bonus && o.bonus.r4);
