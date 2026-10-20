@@ -51,7 +51,7 @@ const EXTRA_CAV_LOSS = 0.35;
 const MIN_GAIN = 1000;
 const LOOT = 1300; // typical loot per raid (real reports), counted in the cavalry profit only
 const WEAK_VS_CAV = { u31: 1, u32: 2, u35: 5, u36: 7 };
-const STRONG_VS_CAV = { u33: 3, u34: 4, u37: 10, u38: 20, u39: 15, u40: 20 };
+const STRONG_VS_CAV = { u33: 3, u34: 4, u37: 10, u38: 20, u39: 15, u40: 40 };
 const MAP_SIZE = 401;
 
 const wrap = v => ((((v + 200) % MAP_SIZE) + MAP_SIZE) % MAP_SIZE) - 200;
