@@ -18,8 +18,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const SCAN_RADIUS = 30;
-const STAGES = 10;
+// 14 stages of about the same size as the 10 within 30 fields before (2026-10-20).
+const SCAN_RADIUS = 36;
+const STAGES = 14;
 const ZOOM_LEVEL = 3; // largest map block per request
 const MAX_REQUESTS = 40;
 const SCAN_MAX_AGE_DAYS = 7;
@@ -240,13 +241,15 @@ async function scanBlocks(village) {
   };
 }
 
-// The saved scan of the village, or a new one when there is none, it is too old, or fresh is set.
+// The saved scan of the village, or a new one when there is none, it is too old or of another
+// radius or stage count, or fresh is set.
 async function scan(village, { fresh = false } = {}) {
   const file = scanFile(village);
   if (!fresh) {
     try {
       const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (Date.now() - Date.parse(saved.scanned) < SCAN_MAX_AGE_DAYS * 24 * 60 * 60 * 1000) {
+      if (saved.radius === SCAN_RADIUS && saved.stages.length === STAGES
+        && Date.now() - Date.parse(saved.scanned) < SCAN_MAX_AGE_DAYS * 24 * 60 * 60 * 1000) {
         recordTaken(saved.occupied);
         return saved;
       }

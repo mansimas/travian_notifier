@@ -7,11 +7,13 @@
  *    the closest; the smallest army from INF_MIN up whose losses stay within INF_LOSS (70%) of the
  *    kill bonus; until fewer than INF_MIN are left;
  *  - then cavalry (Steppe Rider, Marksman, Marauder as one mixed group, at least CAV_MIN_BY_STAGE
- *    for the oasis' stage: 30 / 40 / 50 / 60 / 80 per two stages, 2026-10-20): never
- *    into crop oases, only where the points of the animals weak against horses are at least
+ *    for the oasis' stage: 40 / 60 / 80 / 100 / 120 / 140 / 160 per two stages, 2026-10-20):
+ *    never into crop oases, nor into an oasis our raids hit less than horseRestMinutes ago
+ *    (o.resting: it refills on the way), only where the points of the animals weak against horses are at least
  *    CAV_RATIO (5) times the points of the strong ones, or CAV_RATIO_AT_MAX (2) times for a
- *    full group (CAV_MAX, or every horse left when fewer); losses within CAV_LOSS (CAV_LOSS_WEAK_ONLY where every animal is weak
- *    against horses: rat, spider, boar, wolf) or at most one horse lost; per oasis the army with
+ *    full group (CAV_MAX, or every horse left when fewer); losses within CAV_LOSS (50%) of the
+ *    kill bonus, with no exception (2026-10-20: raids planned to lose more, by the old one-loss
+ *    rule, lost resources overall); per oasis the army with
  *    the most profit per troop-hour; the oases that return the most (kill bonus + loot - losses)
  *    first;
  *  - the points test comes first for horses, in every pass, with no exception (2026-10-20: 252
@@ -19,10 +21,10 @@
  *    there by arrival, 9 horses died);
  *  - the points test only keeps horses out: infantry may raid any oasis;
  *  - no oasis whose kill bonus is under MIN_GAIN: not worth the troops' time;
- *  - no horse group over CAV_MAX; a full group may lose up to CAV_LOSS_AT_MAX of the bonus.
+ *  - no horse group over CAV_MAX.
  * Troops left after that get a second pass (2026-10-20) over the oases still free: infantry trips
  * up to EXTRA_INF_HOURS, cavalry armies grown by EXTRA_CAV_GROWTH per stage band beyond stage 4
- * (stages 5-6 x1.2, 7-8 x1.44, 9-10 x1.728) and losses up to EXTRA_CAV_LOSS.
+ * (stages 5-6 x1.2, 7-8 x1.44, 9-10 x1.728, ...).
  * Battles are simulated with lib/battle.js, a copy of the browser plugin's simulator.
  */
 const fs = require('fs');
@@ -36,19 +38,16 @@ const B = sandbox.window.OasisBattle;
 const INF = ['u61', 'u62'];
 const CAV = { strongFirst: ['u66', 'u64', 'u65'], cheapFirst: ['u64', 'u65', 'u66'] };
 const INF_MIN = 200;
-const CAV_MIN = 30;
+const CAV_MIN = 40;
 // Fewer horses lost too many per raid (2-5 each, 2026-10-20): smallest horse group per stage.
-const CAV_MIN_BY_STAGE = { 1: 30, 2: 30, 3: 40, 4: 40, 5: 50, 6: 50, 7: 60, 8: 60, 9: 80, 10: 80 };
+const CAV_MIN_BY_STAGE = { 1: 40, 2: 40, 3: 60, 4: 60, 5: 80, 6: 80, 7: 100, 8: 100, 9: 120, 10: 120, 11: 140, 12: 140, 13: 160, 14: 160 };
 const cavMin = stage => CAV_MIN_BY_STAGE[stage] || CAV_MIN;
 const CAV_MAX = 600; // no bigger horse group (2026-10-20)
-const CAV_LOSS_AT_MAX = 0.5; // a full group may lose this much, one-loss rule or not
 const INF_LOSS = 0.7;
-const CAV_LOSS = 0.2;
-const CAV_LOSS_WEAK_ONLY = 0.4; // no animal strong against horses there at all
+const CAV_LOSS = 0.5;
 const MAX_INF_HOURS = 2;
 const EXTRA_INF_HOURS = 4;
 const EXTRA_CAV_GROWTH = 1.2;
-const EXTRA_CAV_LOSS = 0.35;
 const MIN_GAIN = 1000;
 const LOOT = 1300; // typical loot per raid (real reports), counted in the cavalry profit only
 const WEAK_VS_CAV = { u31: 1, u32: 2, u35: 5, u36: 7 };
@@ -78,15 +77,15 @@ function fill(left, order, total) {
 }
 
 // Best army of one kind against an oasis, or null. village: { x, y }. maxInfHours: longest
-// infantry trip. minCavLoss: the cavalry loss limit is at least this.
-function planKind(village, o, left, kind, maxInfHours = MAX_INF_HOURS, minCavLoss = 0) {
-  if (kind === 'cav' && !cavAllowed(o.animals)) return null; // points first, always
+// infantry trip.
+function planKind(village, o, left, kind, maxInfHours = MAX_INF_HOURS) {
+  if (kind === 'cav' && (o.resting || !cavAllowed(o.animals))) return null; // points first, always
   const fullOnly = kind === 'cav' && !ratioAtLeast(o.animals, CAV_RATIO); // between 3 and 5 times: full group only
   if (B.simulate({ u66: 1e6 }, o.animals).gain < MIN_GAIN) return null; // the bonus does not depend on the army
   const distance = Math.hypot(wrap(o.x - village.x), wrap(o.y - village.y));
   const hoursOf = army => distance / Math.min(...Object.keys(army).map(u => B.UNITS[u].speed));
   const orders = kind === 'inf' ? [INF] : [CAV.strongFirst, CAV.cheapFirst];
-  const lossLimit = kind === 'inf' ? INF_LOSS : Math.max(minCavLoss, points(o.animals, STRONG_VS_CAV) ? CAV_LOSS : CAV_LOSS_WEAK_ONLY);
+  const lossLimit = kind === 'inf' ? INF_LOSS : CAV_LOSS;
   let best = null;
   for (const order of orders) {
     const have = order.reduce((s, u) => s + (left[u] || 0), 0);
@@ -99,9 +98,7 @@ function planKind(village, o, left, kind, maxInfHours = MAX_INF_HOURS, minCavLos
       const r = B.simulate(army, o.animals);
       if (!r.win) continue;
       const net = r.gain + (kind === 'cav' ? Math.min(LOOT, r.carry || Infinity) : 0) - r.lostRes;
-      const oneLoss = kind === 'cav' && r.totalDeaths <= 1; // one horse lost is fine anyway
-      const capped = kind === 'cav' && n >= top && r.lostRes <= CAV_LOSS_AT_MAX * r.gain;
-      if (net <= 0 || (!capped && !oneLoss && r.lostRes > lossLimit * r.gain)) continue;
+      if (net <= 0 || r.lostRes > lossLimit * r.gain) continue;
       const plan = {
         army, kind, hours, distance, net,
         deaths: Object.fromEntries(Object.entries(r.deaths || {}).filter(([, d]) => d > 0)),
@@ -154,7 +151,7 @@ function plan(village, oases, troops, { extra = true } = {}) {
   // Horses: only where the points test passes. Most return first.
   const cavPass = pass => {
     const cavPlan = o => {
-      const p = planKind(village, o, left, 'cav', MAX_INF_HOURS, pass > 1 ? EXTRA_CAV_LOSS : 0);
+      const p = planKind(village, o, left, 'cav');
       return p && (pass > 1 ? grow(o, p, left) : p);
     };
     const cavOrder = oases.filter(o => !used.has(o) && !isCrop(o))

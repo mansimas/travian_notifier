@@ -11,8 +11,8 @@
  *       perStage[stage] Mercenaries each, as long as that many are at home; all chosen ones are
  *       checked if the first differs;
  *     - mode 'animals': oases with animals, armies by RaidPlanService (cavOnly: the horses
- *       alone, going on with the oases the entries before left over); with 30 or more horses
- *       left over one stage more is loaded and planned again, up to maxStages; if the check
+ *       alone, going on with the oases the entries before left over); no horses where our raids
+ *       hit less than horseRestMinutes ago; with enough horses left over one stage more is loaded and planned again, up to maxStages; if the check
  *       differs, every chosen oasis is asked one by one and the plan made again;
  *  4. the raids are sent, with what was planned (for the evaluation in /autoraid);
  *  5. the newest oasis raid reports (read or not) are kept and matched to the raids sent; the
@@ -25,7 +25,7 @@ const path = require('path');
 
 const STATE_FILE = path.join(process.cwd(), '.tmp', 'autoraid.json');
 const KEEP = 2000; // raids and reports kept
-const MAX_BLOCKS = 8;
+const MAX_BLOCKS = 12;
 const MAX_REPORTS_PER_ROUND = 15;
 const MAX_OUTGOING_PAGES = 20;
 const MINUTE = 60 * 1000;
@@ -345,7 +345,8 @@ async function onTheirWay(villages) {
 }
 
 // Free oases of the village's stages from..to, not raided now, with what the map block shows:
-// [{ x, y, stage, distance, bonus, animals }]. Oases found taken are remembered.
+// [{ x, y, stage, distance, bonus, animals, resting }]. Oases found taken are remembered.
+// resting: our raids hit it less than horseRestMinutes ago, so it is still filling up (no horses).
 async function candidates(village, from, to, busy) {
   const scan = await OasisService.scan(village);
   const taken = OasisService.loadTaken();
@@ -356,6 +357,7 @@ async function candidates(village, from, to, busy) {
   const tiles = await blocksFor(village, list.map(o => o.x + '|' + o.y));
   const out = [];
   const nowTaken = [];
+  const hits = lastHits();
   for (const o of list) {
     const t = tiles.get(o.x + '|' + o.y);
     if (!t) continue;
@@ -364,7 +366,8 @@ async function candidates(village, from, to, busy) {
       if (info) nowTaken.push(info);
       continue;
     }
-    out.push({ ...o, animals: OasisService.parseAnimals(t.text) });
+    const resting = Date.now() - (hits[o.x + '|' + o.y] || 0) < cfg().horseRestMinutes * MINUTE;
+    out.push({ ...o, animals: OasisService.parseAnimals(t.text), resting });
   }
   if (nowTaken.length) OasisService.recordTaken(nowTaken);
   return out;

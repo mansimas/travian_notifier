@@ -39,10 +39,13 @@ module.exports.travian = {
     villages: [
       // restMinutes: an oasis gets no empty raid until this long after our last raid hit it.
       { name: 'mansim1', mode: 'empty', unit: 'u61', stages: 5, perStage: { 1: 50, 2: 50, 3: 100, 4: 100, 5: 100 }, restMinutes: 60 },
-      { name: 'mansim2', mode: 'animals', stages: 8, maxStages: 10 },
+      { name: 'mansim2', mode: 'animals', stages: 8, maxStages: 14 },
       // mansim1's horses go on where mansim2's horses ran out.
-      { name: 'mansim1', mode: 'animals', cavOnly: true, stages: 8, maxStages: 10 },
+      { name: 'mansim1', mode: 'animals', cavOnly: true, stages: 8, maxStages: 14 },
     ],
+    // No horses to an oasis our raids hit less than this long ago: right after a clear it refills
+    // fast (2 wolves seen, 10 there on arrival, 2026-10-20).
+    horseRestMinutes: 120,
     minMinutes: 1,
     maxMinutes: 3,
     // Pause between two sends of one round, and between other page loads.
