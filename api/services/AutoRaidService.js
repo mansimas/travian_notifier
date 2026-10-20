@@ -30,10 +30,10 @@ const MAX_REPORTS_PER_ROUND = 15;
 const MAX_OUTGOING_PAGES = 20;
 const MINUTE = 60 * 1000;
 
-let state = { raids: [], reports: [], lastRound: null, stopped: false };
+let state = { raids: [], reports: [], lastRound: null, stopped: false, cavStopped: false };
 
 function readState() {
-  try { state = { raids: [], reports: [], lastRound: null, stopped: false, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) }; } catch (e) { /* first run */ }
+  try { state = { raids: [], reports: [], lastRound: null, stopped: false, cavStopped: false, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) }; } catch (e) { /* first run */ }
 }
 
 function writeState() {
@@ -436,7 +436,7 @@ async function planAnimals(v, village, home, oases, log) {
 
 async function round() {
   const c = cfg();
-  const log = { at: new Date().toISOString(), dryRun: !c.send, villages: {} };
+  const log = { at: new Date().toISOString(), dryRun: !c.send, villages: {}, ...(state.cavStopped ? { cavStopped: true } : {}) };
   if (state.stopped) {
     log.stopped = true;
     state.lastRound = log;
@@ -455,7 +455,9 @@ async function round() {
       homes[v.name] = Object.fromEntries(Object.entries(SLOTS).map(([u, slot]) => [u, available(form, slot)]));
     }
     // cavOnly: this entry raids with the horses alone (infantry has its own entry).
-    const home = v.cavOnly ? { ...homes[v.name], u61: 0, u62: 0 } : homes[v.name];
+    let home = v.cavOnly ? { ...homes[v.name], u61: 0, u62: 0 } : homes[v.name];
+    // /stop_cav: horses stay at home, infantry and Mercenaries go on.
+    if (state.cavStopped) home = { ...home, u64: 0, u65: 0, u66: 0 };
     const enough = v.mode === 'empty'
       ? (home[v.unit] || 0) >= Math.min(...Object.values(v.perStage))
       : home.u61 + home.u62 >= RaidPlanService.INF_MIN || home.u64 + home.u65 + home.u66 >= RaidPlanService.CAV_MIN;
@@ -578,6 +580,7 @@ module.exports = {
   },
 
   // /stop and /start: no sends until started again (rounds then only note that they are stopped).
+  // /start also ends /stop_cav.
   stop: function () {
     state.stopped = true;
     writeState();
@@ -585,8 +588,20 @@ module.exports = {
   },
   resume: function () {
     state.stopped = false;
+    state.cavStopped = false;
     writeState();
     sails.log.verbose('autoraid: started');
+  },
+  // /stop_cav and /start_cav: only the horses stay at home.
+  stopCav: function () {
+    state.cavStopped = true;
+    writeState();
+    sails.log.verbose('autoraid: horses stopped');
+  },
+  resumeCav: function () {
+    state.cavStopped = false;
+    writeState();
+    sails.log.verbose('autoraid: horses started');
   },
 
   status: function () {
@@ -594,6 +609,7 @@ module.exports = {
       enabled: cfg().enabled,
       send: cfg().send,
       stopped: state.stopped,
+      cavStopped: state.cavStopped,
       villages: cfg().villages,
       lastRound: state.lastRound,
       raidsSent: state.raids.length,

@@ -6,8 +6,10 @@
  *                     at most MAX_MUTE_HOURS).
  * GET|POST /unmute    end the quiet time, so the next new attack rings again.
  * GET|POST /stop     no more auto raids (AutoRaidService) until /start.
- * GET|POST /start    auto raids go on.
- * All four public as https://avogames.com/mute, /unmute, /stop, /start (nginx), no key - asked
+ * GET|POST /start    auto raids go on (also ends /stop_cav).
+ * GET|POST /stop_cav  no more horse raids until /start_cav or /start; infantry and Mercenaries go on.
+ * GET|POST /start_cav horse raids go on.
+ * All public as https://avogames.com/mute, /unmute, /stop, /start, /stop_cav, /start_cav (nginx), no key - asked
  * for that way.
  * Answered with a small page, as they are opened from the phone's browser.
  */
@@ -44,6 +46,18 @@ module.exports = {
     AutoRaidService.resume();
     if (req.method === 'POST') return res.json({ ok: true, stopped: false });
     return page(res, 'Auto raids are on again.');
+  },
+
+  stopCav: function (req, res) {
+    AutoRaidService.stopCav();
+    if (req.method === 'POST') return res.json({ ok: true, cavStopped: true });
+    return page(res, 'Horse raids are stopped, infantry and Mercenaries go on. Open /start_cav to send horses again.');
+  },
+
+  startCav: function (req, res) {
+    AutoRaidService.resumeCav();
+    if (req.method === 'POST') return res.json({ ok: true, cavStopped: false });
+    return page(res, 'Horse raids are on again.');
   },
 
   unmute: function (req, res) {

@@ -9,5 +9,9 @@ module.exports.routes = {
   'POST /stop': 'StatusController.stopRaids',
   'GET /start': 'StatusController.startRaids',
   'POST /start': 'StatusController.startRaids',
+  'GET /stop_cav': 'StatusController.stopCav',
+  'POST /stop_cav': 'StatusController.stopCav',
+  'GET /start_cav': 'StatusController.startCav',
+  'POST /start_cav': 'StatusController.startCav',
   'POST /unmute': 'StatusController.unmute',
 };
