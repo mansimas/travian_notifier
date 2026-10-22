@@ -30,7 +30,7 @@ module.exports.travian = {
   // Auto raids (AutoRaidService): every minMinutes..maxMinutes (random) each village raids
   // oases of its first stages as long as troops last. Mode 'empty': Mercenaries to empty oases,
   // perStage[stage] each. Mode 'animals': oases with animals, armies by RaidPlanService;
-  // cavOnly: with the horses alone. Entries go in this order, each on the oases left over.
+  // cavOnly: with the horses alone. Mode 'natars': per units to each Natar village within radius. Entries go in this order, each on the oases left over.
   // AUTO_RAID_SEND=0 = dry run: everything is read and logged, nothing is sent and no report
   // is opened. GET /stop and /start pause and resume the sends.
   autoRaid: {
@@ -39,9 +39,14 @@ module.exports.travian = {
     villages: [
       // restMinutes: an oasis gets no empty raid until this long after our last raid hit it.
       { name: 'mansim1', mode: 'empty', unit: 'u61', stages: 5, perStage: { 1: 50, 2: 50, 3: 100, 4: 100, 5: 100 }, restMinutes: 60 },
+      // mansim3's Mercenaries go on with the empty oases mansim1 left, same rules.
+      { name: 'mansim3', mode: 'empty', unit: 'u61', stages: 5, perStage: { 1: 50, 2: 50, 3: 100, 4: 100, 5: 100 }, restMinutes: 60 },
       { name: 'mansim2', mode: 'animals', stages: 8, maxStages: 14 },
       // mansim1's horses go on where mansim2's horses ran out.
       { name: 'mansim1', mode: 'animals', cavOnly: true, stages: 8, maxStages: 14 },
+      // mansim3's Marksmen raid Natar villages: 10 each, within 37 fields (about 15 oasis
+      // stages: stage 14 ends at 36).
+      { name: 'mansim3', mode: 'natars', unit: 'u65', per: 10, radius: 37 },
     ],
     // No horses to an oasis our raids hit less than this long ago: right after a clear it refills
     // fast (2 wolves seen, 10 there on arrival, 2026-10-20).

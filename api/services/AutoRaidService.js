@@ -14,6 +14,8 @@
  *       alone, going on with the oases the entries before left over); no horses where our raids
  *       hit less than horseRestMinutes ago; with enough horses left over one stage more is loaded and planned again, up to maxStages; if the check
  *       differs, every chosen oasis is asked one by one and the plan made again;
+ *     - mode 'natars': no oases; `per` v.unit to each Natar village within `radius` fields
+ *       (OasisService.natars) with no raid of ours on its way, closest first;
  *  4. the raids are sent, with what was planned (for the evaluation in /autoraid);
  *  5. the newest oasis raid reports (read or not) are kept and matched to the raids sent; the
  *     ones that were unread are marked unread again, so you still see them as new in the game.
@@ -110,14 +112,15 @@ async function blocksFor(village, keys) {
 const slotOf = unit => Number(unit.slice(1)) % 10 || 10; // u61 -> 1, u70 -> 10
 
 // Confirmation page -> { body, arrival } for the final post, or throws. army: { uNN: n }.
-function confirmForm(html, army) {
+// owner: who the target must still belong to (Nature for an oasis, Natars for a Natar village).
+function confirmForm(html, army, owner = 'Nature') {
   const at = html.indexOf('id="troopSendForm"');
   if (at < 0) {
     const err = html.match(/class="error[^"]*"[^>]*>([\s\S]*?)<\//);
     throw new Error('no confirmation page' + (err ? ': ' + plain(err[1]).trim() : ''));
   }
   const form = html.slice(html.lastIndexOf('<form', at), html.indexOf('</form>', at));
-  if (!/Nature/.test(plain(form))) throw new Error('target is not nature any more');
+  if (!plain(form).includes(owner)) throw new Error('target is not ' + owner + ' any more');
   const fields = [...form.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)"/g)].map(m => [m[1], m[2]]);
   for (let slot = 1; slot <= 10; slot++) {
     const want = Object.entries(army).filter(([u]) => slotOf(u) === slot).reduce((s, [, n]) => s + n, 0);
@@ -133,7 +136,7 @@ function confirmForm(html, army) {
 
 const FORM = { 'Content-Type': 'application/x-www-form-urlencoded' };
 
-async function sendRaid(village, key, army) {
+async function sendRaid(village, key, army, owner) {
   const [x, y] = key.split('|');
   await page('GET', '/build.php?newdid=' + village.id + '&gid=16&tt=2&eventType=4&x=' + x + '&y=' + y);
   await pause(cfg().pageGapSeconds);
@@ -142,7 +145,7 @@ async function sendRaid(village, key, army) {
   for (const [u, n] of Object.entries(army)) p.set('troop[t' + slotOf(u) + ']', String(n));
   p.set('villagename', ''); p.set('x', x); p.set('y', y); p.set('eventType', '4'); p.set('ok', 'ok');
   const confirm = await page('POST', '/build.php?gid=16&tt=2', { body: p.toString(), headers: FORM });
-  const { body, arrival } = confirmForm(confirm, army);
+  const { body, arrival } = confirmForm(confirm, army, owner);
   await pause(cfg().pageGapSeconds);
   const done = await page('POST', '/build.php?gid=16&tt=2', { body, headers: FORM });
   if (done.includes('id="confirmSendTroops"')) throw new Error('the game did not accept the send');
@@ -434,6 +437,21 @@ async function planAnimals(v, village, home, oases, log) {
   return planFrom(fresh);
 }
 
+// [{ oasis, army }] for a village in mode 'natars': per v.unit to each Natar village within
+// v.radius that has no raid of ours on its way, closest first, as long as that many are at home.
+// (oasis: the target, shaped as an oasis so the rest of the round treats both alike.)
+async function planNatars(v, village, home, busy) {
+  const chosen = [];
+  let left = home[v.unit] || 0;
+  for (const n of await OasisService.natars(village, v.radius)) {
+    if (left < v.per) break;
+    if (busy.has(n.x + '|' + n.y)) continue;
+    chosen.push({ oasis: { ...n, stage: null, animals: [] }, army: { [v.unit]: v.per } });
+    left -= v.per;
+  }
+  return chosen;
+}
+
 async function round() {
   const c = cfg();
   const log = { at: new Date().toISOString(), dryRun: !c.send, villages: {}, ...(state.cavStopped ? { cavStopped: true } : {}) };
@@ -458,10 +476,10 @@ async function round() {
     let home = v.cavOnly ? { ...homes[v.name], u61: 0, u62: 0 } : homes[v.name];
     // /stop_cav: horses stay at home, infantry and Mercenaries go on.
     if (state.cavStopped) home = { ...home, u64: 0, u65: 0, u66: 0 };
-    const enough = v.mode === 'empty'
-      ? (home[v.unit] || 0) >= Math.min(...Object.values(v.perStage))
+    const enough = v.mode === 'empty' ? (home[v.unit] || 0) >= Math.min(...Object.values(v.perStage))
+      : v.mode === 'natars' ? (home[v.unit] || 0) >= v.per
       : home.u61 + home.u62 >= RaidPlanService.INF_MIN || home.u64 + home.u65 + home.u66 >= RaidPlanService.CAV_MIN;
-    v.label = v.name + (v.cavOnly ? ' horses' : '');
+    v.label = v.name + (v.cavOnly ? ' horses' : v.mode === 'natars' ? ' natars' : '');
     log.villages[v.label] = { mode: v.mode, home };
     villages.push({ v, village, home, enough });
   }
@@ -472,7 +490,7 @@ async function round() {
     for (const { v, village, home, enough } of villages) {
       if (!enough) continue;
       const vlog = log.villages[v.label];
-      let oases = await candidates(village, 1, v.stages, busy);
+      let oases = v.mode === 'natars' ? [] : await candidates(village, 1, v.stages, busy);
       if (v.mode === 'animals') {
         // Enough horses left over for the next stage's minimum: one stage more and plan again, up to maxStages.
         const cavHome = home.u64 + home.u65 + home.u66;
@@ -485,7 +503,9 @@ async function round() {
           oases = oases.concat(await candidates(village, vlog.stages, vlog.stages, busy));
         }
       }
-      const chosen = v.mode === 'empty' ? await planEmpty(v, home, oases, vlog) : await planAnimals(v, village, home, oases, vlog);
+      const chosen = v.mode === 'empty' ? await planEmpty(v, home, oases, vlog)
+        : v.mode === 'natars' ? await planNatars(v, village, home, busy)
+        : await planAnimals(v, village, home, oases, vlog);
       vlog.targets = chosen.map(t => ({
         key: t.oasis.x + '|' + t.oasis.y, stage: t.oasis.stage, distance: t.oasis.distance, army: t.army,
         animals: t.oasis.animals.map(a => a.count + ' ' + a.unit).join(', '),
@@ -498,7 +518,7 @@ async function round() {
         if (!c.send) continue;
         await pause(c.sendGapSeconds);
         try {
-          const arrival = await sendRaid(village, key, t.army);
+          const arrival = await sendRaid(village, key, t.army, v.mode === 'natars' ? 'Natars' : 'Nature');
           busy.add(key);
           state.raids.push({
             key, village: village.name, mode: v.mode, stage: t.oasis.stage, army: t.army, sentAt: Date.now(), arrival,

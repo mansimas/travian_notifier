@@ -5,6 +5,7 @@
  *   npm run test-alarm  the full alarm: several calls, as an attack rings it
  *   npm run oases -- [stage] [village] [fresh]
  *                       animals of one oasis stage (1 = closest), saves .tmp/oases-<x>_<y>.json
+ *   npm run troops      every troop of every village: home, outgoing, returning, reinforcing
  *   npm run autoraid    one auto raid round now (AUTO_RAID_SEND=0 for a dry run)
  *   npm run reports-backfill
  *                       every oasis raid report still in the game into .tmp/report-history.json,
@@ -36,6 +37,18 @@ const commands = {
   'test-alarm': async function () {
     await PhoneService.alarm('Travian alarm test. Your village is under attack. Wake up.');
     console.log('alarm done');
+  },
+  troops: async function () {
+    const { total, byVillage, byState, byVillageState, pages } = await TroopsService.count();
+    const line = units => Object.entries(units).sort().map(([u, n]) => u + ' ' + n).join(', ') || 'none';
+    console.log('TOTAL: ' + line(total));
+    console.log('by village:');
+    for (const [v, units] of Object.entries(byVillage)) {
+      console.log('  ' + v + ' (' + pages[v] + ' pages): ' + line(units));
+      for (const [s, u] of Object.entries(byVillageState[v])) console.log('    ' + s + ': ' + line(u));
+    }
+    console.log('by state:');
+    for (const [s, units] of Object.entries(byState)) console.log('  ' + s + ': ' + line(units));
   },
   autoraid: async function () {
     const log = await AutoRaidService.round();

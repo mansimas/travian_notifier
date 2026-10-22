@@ -151,17 +151,16 @@ async function tileAnimals(x, y) {
   return { animals: parseAnimals(start < 0 ? html : html.slice(start, html.indexOf('</table>', start))), taken: false };
 }
 
-// Map blocks until every field within SCAN_RADIUS of the village was in one: the first block
+// Map blocks until every field within radius of the village was in one: the first block
 // around the village, its size gives a grid over the area, a block on anything still missing.
-async function scanBlocks(village) {
-  const distance = (x, y) => Math.hypot(wrap(x - village.x), wrap(y - village.y));
+// onTile(tile) gets every tile of every reply. Returns the number of requests.
+async function coverArea(village, radius, onTile) {
   const needed = new Set();
-  for (let dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
-    for (let dy = -SCAN_RADIUS; dy <= SCAN_RADIUS; dy++) {
-      if (Math.hypot(dx, dy) <= SCAN_RADIUS) needed.add(dx + '|' + dy); // offsets from the village
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dy = -radius; dy <= radius; dy++) {
+      if (Math.hypot(dx, dy) <= radius) needed.add(dx + '|' + dy); // offsets from the village
     }
   }
-  const oases = new Map();
   let block = null; // { minX, maxX, minY, maxY }: fields a reply spans around its center
   const planned = [{ x: 0, y: 0 }];
   const blockMisses = c => {
@@ -194,14 +193,13 @@ async function scanBlocks(village) {
       const dy = wrap(t.position.y - cy);
       minX = Math.min(minX, dx); maxX = Math.max(maxX, dx);
       minY = Math.min(minY, dy); maxY = Math.max(maxY, dy);
-      const o = oasisOf(t);
-      if (o && distance(o.x, o.y) <= SCAN_RADIUS) oases.set(o.x + '|' + o.y, o);
+      onTile(t);
     }
     if (!block) {
       block = { minX, maxX, minY, maxY };
       const axis = (lo, hi) => {
         const out = [];
-        for (let v = -SCAN_RADIUS - lo; v - SCAN_RADIUS - lo < hi - lo + 1 + SCAN_RADIUS; v += hi - lo + 1) out.push(v);
+        for (let v = -radius - lo; v - radius - lo < hi - lo + 1 + radius; v += hi - lo + 1) out.push(v);
         return out;
       };
       for (const x of axis(minX, maxX)) for (const y of axis(minY, maxY)) planned.push({ x, y });
@@ -212,6 +210,17 @@ async function scanBlocks(village) {
     }
     if (needed.size === before) throw new Error('map reply did not cover the asked area');
   }
+  return requests;
+}
+
+// Every oasis within SCAN_RADIUS, split into stages (see scan).
+async function scanBlocks(village) {
+  const distance = (x, y) => Math.hypot(wrap(x - village.x), wrap(y - village.y));
+  const oases = new Map();
+  const requests = await coverArea(village, SCAN_RADIUS, t => {
+    const o = oasisOf(t);
+    if (o && distance(o.x, o.y) <= SCAN_RADIUS) oases.set(o.x + '|' + o.y, o);
+  });
 
   const list = [...oases.values()]
     .map(o => ({ ...o, distance: Math.round(distance(o.x, o.y) * 100) / 100 }))
@@ -260,6 +269,33 @@ async function scan(village, { fresh = false } = {}) {
   fs.writeFileSync(file, JSON.stringify(result, null, 1));
   sails.log.verbose('oases: scanned ' + village.name + ', ' + result.counts.free + ' free / ' + result.counts.occupied + ' taken');
   return result;
+}
+
+// Natar villages (map tiles of uid 1) within radius of the village, closest first:
+// [{ x, y, did, population, distance }]. Kept in .tmp/natars-<x>_<y>.json and reused for
+// SCAN_MAX_AGE_DAYS, like the oasis scan.
+async function natars(village, radius) {
+  const file = path.join(process.cwd(), '.tmp', 'natars-' + village.x + '_' + village.y + '.json');
+  try {
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (saved.radius === radius && Date.now() - Date.parse(saved.scanned) < SCAN_MAX_AGE_DAYS * 24 * 60 * 60 * 1000) return saved.villages;
+  } catch (e) { /* none yet */ }
+  const distance = (x, y) => Math.hypot(wrap(x - village.x), wrap(y - village.y));
+  const found = new Map();
+  await coverArea(village, radius, t => {
+    if (t.uid !== 1 || !(t.did > 0)) return;
+    const d = distance(t.position.x, t.position.y);
+    if (d > radius) return;
+    const pop = (t.text || '').match(/\{k\.einwohner\}\s*(\d+)/);
+    found.set(t.position.x + '|' + t.position.y, {
+      x: t.position.x, y: t.position.y, did: t.did, population: pop ? Number(pop[1]) : null, distance: Math.round(d * 100) / 100,
+    });
+  });
+  const list = [...found.values()].sort((a, b) => a.distance - b.distance);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ village, radius, scanned: new Date().toISOString(), villages: list }, null, 1));
+  sails.log.verbose('natars: scanned ' + village.name + ', ' + list.length + ' Natar villages within ' + radius);
+  return list;
 }
 
 const sameAnimals = (a, b) => a.length === b.length && a.every(t => b.some(u => u.unit === t.unit && u.count === t.count));
@@ -338,6 +374,7 @@ module.exports = {
   oasisOf,
   serial,
   scan,
+  natars,
   findVillage,
   requestBlock,
   tileAnimals,
