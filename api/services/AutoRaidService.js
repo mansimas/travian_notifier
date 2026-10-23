@@ -494,7 +494,8 @@ function oftenDue(key, n) {
 // v.radius that has no raid of ours on its way and is not left alone (v.skip or natarTarget),
 // closest first, as long as at least per are at home; natarTarget's size, or what is left.
 // A village in v.often ({ key: n }) hits n times as often: the next raid goes once the last
-// one on its way is (n - 1) / n of its trip there.
+// one on its way is (n - 1) / n of its trip there. v.single: never a second raid on its way
+// (no often, also not for a rich village).
 // (oasis: the target, shaped as an oasis so the rest of the round treats both alike.)
 async function planNatars(v, village, home, busy) {
   const chosen = [];
@@ -503,7 +504,7 @@ async function planNatars(v, village, home, busy) {
     if (left < v.per) break;
     const key = n.x + '|' + n.y;
     const t = natarTarget(v, village, key);
-    if (t.skip || (busy.has(key) && !oftenDue(key, t.often))) continue;
+    if (t.skip || (busy.has(key) && (v.single || !oftenDue(key, t.often)))) continue;
     const size = Math.min(t.size, left);
     chosen.push({ oasis: { ...n, stage: null, animals: [] }, army: { [v.unit]: size } });
     left -= size;
@@ -538,7 +539,7 @@ async function round() {
     const enough = v.mode === 'empty' ? (home[v.unit] || 0) >= Math.min(...Object.values(v.perStage))
       : v.mode === 'natars' ? (home[v.unit] || 0) >= v.per
       : home.u61 + home.u62 >= RaidPlanService.INF_MIN || home.u64 + home.u65 + home.u66 >= RaidPlanService.CAV_MIN;
-    v.label = v.name + (v.cavOnly ? ' horses' : v.mode === 'natars' ? ' natars' : '');
+    v.label = v.name + (v.cavOnly ? ' horses' : v.mode === 'natars' ? ' natars ' + v.unit : ''); // a village may have two natars entries
     log.villages[v.label] = { mode: v.mode, home };
     villages.push({ v, village, home, enough });
   }

@@ -55,6 +55,10 @@ module.exports.travian = {
       // often: hits N times as often (-86|48 gave 60% of the Natar loot, 2026-10-23).
       { name: 'mansim3', mode: 'natars', unit: 'u65', per: 10, radius: 37, often: { '-86|48': 2 },
         skip: NATAR_SKIP },
+      // mansim1's Marksmen the oasis raids left at home extend mansim3's (2026-10-23: 164 at home,
+      // no oasis passed the rules; the villages are a field apart): they go to the Natar villages
+      // mansim3 had no Marksmen for, never to one with a raid of ours on its way (single).
+      { name: 'mansim1', mode: 'natars', unit: 'u65', per: 10, radius: 37, single: true, skip: NATAR_SKIP },
       // Steppe Riders the animal raids left at home raid Natar villages too (2026-10-23).
       { name: 'mansim2', mode: 'natars', unit: 'u64', per: 10, radius: 37, skip: NATAR_SKIP },
       { name: 'mansim1', mode: 'natars', unit: 'u64', per: 10, radius: 37, skip: NATAR_SKIP },
