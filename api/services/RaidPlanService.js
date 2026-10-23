@@ -8,7 +8,7 @@
  *    2026-10-23, when mansim2's Mercenaries lost 156,600 for 306,453 in a day) of the kill bonus;
  *    until fewer than INF_MIN are left;
  *  - then cavalry (Steppe Rider, Marksman, Marauder as one mixed group, at least CAV_MIN_BY_STAGE
- *    for the oasis' stage: 40 / 60 / 80 / 100 / 120 / 140 / 160 per two stages, 2026-10-20):
+ *    for the oasis' stage: 60 / 80 / 80 / 100 / 120 / 140 / 160 per two stages, 2026-10-23):
  *    never into crop oases, nor into an oasis our raids hit less than horseRestMinutes ago
  *    (o.resting: it refills on the way), only where the points of the animals weak against horses are at least
  *    CAV_RATIO_AT_MAX (2) times the points of the strong ones; losses within cavLoss(n) of
@@ -40,8 +40,9 @@ const INF = ['u61', 'u62'];
 const CAV = { strongFirst: ['u66', 'u64', 'u65'], cheapFirst: ['u64', 'u65', 'u66'] };
 const INF_MIN = 200;
 const CAV_MIN = 40;
-// Fewer horses lost too many per raid (2-5 each, 2026-10-20): smallest horse group per stage.
-const CAV_MIN_BY_STAGE = { 1: 40, 2: 40, 3: 60, 4: 60, 5: 80, 6: 80, 7: 100, 8: 100, 9: 120, 10: 120, 11: 140, 12: 140, 13: 160, 14: 160 };
+// Fewer horses lost too many per raid (2-5 each, 2026-10-20; groups under 100 lost 1.7% a raid against
+// 0.8% for 100-199, 2026-10-23: stages 1-4 from 40/60 to 60/80): smallest horse group per stage.
+const CAV_MIN_BY_STAGE = { 1: 60, 2: 60, 3: 80, 4: 80, 5: 80, 6: 80, 7: 100, 8: 100, 9: 120, 10: 120, 11: 140, 12: 140, 13: 160, 14: 160 };
 const cavMin = stage => CAV_MIN_BY_STAGE[stage] || CAV_MIN;
 const CAV_MAX = 600; // no bigger horse group (2026-10-20)
 const INF_LOSS = 0.5;
