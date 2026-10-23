@@ -438,14 +438,15 @@ async function planAnimals(v, village, home, oases, log) {
 }
 
 // [{ oasis, army }] for a village in mode 'natars': per v.unit to each Natar village within
-// v.radius that has no raid of ours on its way, closest first, as long as that many are at home.
+// v.radius that has no raid of ours on its way and is not in v.skip, closest first, as long as
+// that many are at home.
 // (oasis: the target, shaped as an oasis so the rest of the round treats both alike.)
 async function planNatars(v, village, home, busy) {
   const chosen = [];
   let left = home[v.unit] || 0;
   for (const n of await OasisService.natars(village, v.radius)) {
     if (left < v.per) break;
-    if (busy.has(n.x + '|' + n.y)) continue;
+    if (busy.has(n.x + '|' + n.y) || (v.skip || []).includes(n.x + '|' + n.y)) continue;
     chosen.push({ oasis: { ...n, stage: null, animals: [] }, army: { [v.unit]: v.per } });
     left -= v.per;
   }

@@ -46,7 +46,8 @@ module.exports.travian = {
       { name: 'mansim1', mode: 'animals', cavOnly: true, stages: 8, maxStages: 14 },
       // mansim3's Marksmen raid Natar villages: 10 each, within 37 fields (about 15 oasis
       // stages: stage 14 ends at 36).
-      { name: 'mansim3', mode: 'natars', unit: 'u65', per: 10, radius: 37 },
+      // skip: Natar villages never raided (-87|40: 26 raids, 0 loot, 2026-10-23).
+      { name: 'mansim3', mode: 'natars', unit: 'u65', per: 10, radius: 37, skip: ['-87|40'] },
     ],
     // No horses to an oasis our raids hit less than this long ago: right after a clear it refills
     // fast (2 wolves seen, 10 there on arrival, 2026-10-20).
