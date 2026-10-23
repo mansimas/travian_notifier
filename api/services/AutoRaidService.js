@@ -437,16 +437,28 @@ async function planAnimals(v, village, home, oases, log) {
   return planFrom(fresh);
 }
 
+// For a target hit n times as often: the newest raid of ours on its way has done (n - 1) / n
+// of its trip, so the next one hits a 1 / n trip later.
+function oftenDue(key, n) {
+  if (!n || n < 2) return false;
+  const last = state.raids.filter(r => r.key === key && r.arrival && r.sentAt).sort((a, b) => b.arrival - a.arrival)[0];
+  if (!last) return false;
+  const trip = last.arrival - last.sentAt / 1000;
+  return last.arrival - Date.now() / 1000 <= trip / n;
+}
+
 // [{ oasis, army }] for a village in mode 'natars': per v.unit to each Natar village within
 // v.radius that has no raid of ours on its way and is not in v.skip, closest first, as long as
-// that many are at home.
+// that many are at home. A village in v.often ({ key: n }) hits n times as often: the next raid
+// goes once the last one on its way is (n - 1) / n of its trip there.
 // (oasis: the target, shaped as an oasis so the rest of the round treats both alike.)
 async function planNatars(v, village, home, busy) {
   const chosen = [];
   let left = home[v.unit] || 0;
   for (const n of await OasisService.natars(village, v.radius)) {
     if (left < v.per) break;
-    if (busy.has(n.x + '|' + n.y) || (v.skip || []).includes(n.x + '|' + n.y)) continue;
+    const key = n.x + '|' + n.y;
+    if ((v.skip || []).includes(key) || (busy.has(key) && !oftenDue(key, (v.often || {})[key]))) continue;
     chosen.push({ oasis: { ...n, stage: null, animals: [] }, army: { [v.unit]: v.per } });
     left -= v.per;
   }
