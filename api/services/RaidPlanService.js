@@ -4,8 +4,9 @@
  * Armies for oases with animals, by the rules the player set (2026-10-19):
  *  - only the animals there now count (no respawn on the way);
  *  - infantry (Mercenary, Bowman) first: trips of at most MAX_INF_HOURS, crop oases first, then
- *    the closest; the smallest army from INF_MIN up whose losses stay within INF_LOSS (70%) of the
- *    kill bonus; until fewer than INF_MIN are left;
+ *    the closest; the smallest army from INF_MIN up whose losses stay within INF_LOSS (50%; 70% until
+ *    2026-10-23, when mansim2's Mercenaries lost 156,600 for 306,453 in a day) of the kill bonus;
+ *    until fewer than INF_MIN are left;
  *  - then cavalry (Steppe Rider, Marksman, Marauder as one mixed group, at least CAV_MIN_BY_STAGE
  *    for the oasis' stage: 40 / 60 / 80 / 100 / 120 / 140 / 160 per two stages, 2026-10-20):
  *    never into crop oases, nor into an oasis our raids hit less than horseRestMinutes ago
@@ -43,7 +44,7 @@ const CAV_MIN = 40;
 const CAV_MIN_BY_STAGE = { 1: 40, 2: 40, 3: 60, 4: 60, 5: 80, 6: 80, 7: 100, 8: 100, 9: 120, 10: 120, 11: 140, 12: 140, 13: 160, 14: 160 };
 const cavMin = stage => CAV_MIN_BY_STAGE[stage] || CAV_MIN;
 const CAV_MAX = 600; // no bigger horse group (2026-10-20)
-const INF_LOSS = 0.7;
+const INF_LOSS = 0.5;
 // Share of the kill bonus a horse group of n may lose (2026-10-20): over 400 50%, 200-400 40%, under 200 30%.
 const cavLoss = n => (n > 400 ? 0.5 : n >= 200 ? 0.4 : 0.3);
 const MAX_INF_HOURS = 2;

@@ -15,12 +15,16 @@
  *       hit less than horseRestMinutes ago; with enough horses left over one stage more is loaded and planned again, up to maxStages; if the check
  *       differs, every chosen oasis is asked one by one and the plan made again;
  *     - mode 'natars': no oases; `per` v.unit to each Natar village within `radius` fields
- *       (OasisService.natars) with no raid of ours on its way, closest first;
+ *       (OasisService.natars) with no raid of ours on its way, closest first; by the Natar
+ *       reports a poor village is left alone for a while and a rich one gets more, more often
+ *       (natarTarget);
  *  4. the raids are sent, with what was planned (for the evaluation in /autoraid);
- *  5. the newest oasis raid reports (read or not) are kept and matched to the raids sent; the
+ *  5. the newest oasis and Natar raid reports (read or not) are kept and matched to the raids sent; the
  *     ones that were unread are marked unread again, so you still see them as new in the game.
  * With send off (dry run) step 4 only logs what it would send, and step 5 is left out.
- * Kept in .tmp/autoraid.json: raids sent, reports read, stopped or not, the last round.
+ * Troops sent by one entry are taken off what the next entries of that village see at home.
+ * Kept in .tmp/autoraid.json: raids sent, reports read (Natar ones apart), Natar villages left
+ * alone, stopped or not, the last round.
  */
 const fs = require('fs');
 const path = require('path');
@@ -32,15 +36,17 @@ const MAX_REPORTS_PER_ROUND = 15;
 const MAX_OUTGOING_PAGES = 20;
 const MINUTE = 60 * 1000;
 
-let state = { raids: [], reports: [], lastRound: null, stopped: false, cavStopped: false };
+const EMPTY_STATE = { raids: [], reports: [], natarReports: [], natarSkip: {}, lastRound: null, stopped: false, cavStopped: false };
+let state = { ...EMPTY_STATE };
 
 function readState() {
-  try { state = { raids: [], reports: [], lastRound: null, stopped: false, cavStopped: false, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) }; } catch (e) { /* first run */ }
+  try { state = { ...EMPTY_STATE, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) }; } catch (e) { /* first run */ }
 }
 
 function writeState() {
   state.raids = state.raids.slice(-KEEP);
   state.reports = state.reports.slice(-KEEP);
+  state.natarReports = state.natarReports.slice(-KEEP);
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 1));
 }
@@ -176,8 +182,11 @@ function parseReport(html, id) {
   const start = html.indexOf('id="reportWrapper"');
   const body = html.slice(start, start + 60000);
   const text = plain(body);
-  const title = text.match(/(\S+) raids Unoccupied oasis \(\s*(-?\d+)\s*\|\s*(-?\d+)\s*\)/);
+  const title = text.match(/(\S+) raids Unoccupied oasis \(\s*(-?\d+)\s*\|\s*(-?\d+)\s*\)/)
+    || text.match(/(\S+) raids (Natars) (-?\d+)\|(-?\d+)/);
   if (!title) return null;
+  const natars = title[2] === 'Natars';
+  if (natars) title.splice(2, 1);
   const own = Array.from({ length: 10 }, (_, i) => 'u' + (61 + i));
   const nature = Array.from({ length: 10 }, (_, i) => 'u' + (31 + i));
   const att = unitRows(body, 'u61');
@@ -198,6 +207,8 @@ function parseReport(html, id) {
     carried: bounty ? num(bounty[5]) : null,
     capacity: bounty ? num(bounty[6]) : null,
     heroBonus: hero ? [1, 2, 3, 4].reduce((s, i) => s + num(hero[i]), 0) : 0,
+    ...(natars ? { natars: true, found: {}, killed: {} } : {}),
+    at: Date.now(),
   };
 }
 
@@ -228,7 +239,7 @@ async function readReports() {
   let history = [];
   try { history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')); } catch (e) { /* no backfill yet */ }
   const saved = new Map(history.map(r => [r.id, r]));
-  const have = new Set(state.reports.map(r => r.id));
+  const have = new Set(state.reports.concat(state.natarReports).map(r => r.id));
   let read = 0;
   let capped = false;
   const unread = [];
@@ -237,7 +248,7 @@ async function readReports() {
       if (p > 1) await pause(cfg().pageGapSeconds);
       const list = await page('GET', '/report/offensive' + (p > 1 ? '?page=' + p : ''));
       const rows = [...list.matchAll(/<tr>\s*<td class="sel">[\s\S]*?<\/tr>/g)].map(m => m[0])
-        .filter(r => /raids Unoccupied oasis/.test(plain(r)));
+        .filter(r => /raids (Unoccupied oasis|Natars)/.test(plain(r)));
       let fresh = 0;
       for (const row of rows) {
         const href = (row.match(/href="\?(id=[^"]+)"/) || [])[1];
@@ -258,7 +269,7 @@ async function readReports() {
           read++;
         }
         if (!report) continue;
-        state.reports.push(report);
+        (report.natars ? state.natarReports : state.reports).push(report);
         have.add(id);
         matchReport(report);
       }
@@ -437,6 +448,38 @@ async function planAnimals(v, village, home, oases, log) {
   return planFrom(fresh);
 }
 
+// Natar villages by their reports (since the last time one was left alone, all our villages):
+// NATAR_POOR.raids raids in a row under NATAR_POOR.loot each on average -> left alone for
+// NATAR_POOR.days, then tried again; the last NATAR_RICH.raids all at least NATAR_RICH.fill full
+// -> twice the army (up to NATAR_RICH.most times per) and twice as often. A raid back under
+// half full halves the army again (not under per). 2026-10-23: of 11 Natar villages raided,
+// one gave 60% of the loot and five under 50 per raid.
+const NATAR_POOR = { raids: 10, loot: 50, days: 3 };
+const NATAR_RICH = { raids: 3, fill: 0.9, most: 4 };
+
+// { skip, often, size } for a Natar village raided by entry v (size: units of v.unit to send).
+function natarTarget(v, village, key) {
+  const since = state.natarSkip[key] || 0;
+  if (since > Date.now()) return { skip: true };
+  const reports = state.natarReports.filter(r => r.key === key && r.at > since)
+    .sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10)); // report ids grow with time; the backlog reads newest first
+  const lastPoor = reports.slice(-NATAR_POOR.raids);
+  if (lastPoor.length === NATAR_POOR.raids && lastPoor.reduce((t, r) => t + r.bounty, 0) / NATAR_POOR.raids < NATAR_POOR.loot) {
+    state.natarSkip[key] = Date.now() + NATAR_POOR.days * 24 * 60 * MINUTE;
+    sails.log.verbose('autoraid: Natar village ' + key + ' left alone for ' + NATAR_POOR.days + ' days');
+    return { skip: true };
+  }
+  const fill = r => (r.capacity ? r.bounty / r.capacity : 0);
+  const lastRich = reports.slice(-NATAR_RICH.raids);
+  const rich = lastRich.length === NATAR_RICH.raids && lastRich.every(r => fill(r) >= NATAR_RICH.fill);
+  const own = reports.filter(r => r.village === village.name && r.sent[v.unit]);
+  const last = own[own.length - 1];
+  let size = last ? last.sent[v.unit] : v.per;
+  if (last && rich) size *= 2;
+  else if (last && fill(last) < 0.5) size = Math.floor(size / 2);
+  return { skip: (v.skip || []).includes(key), often: Math.max((v.often || {})[key] || 1, rich ? 2 : 1), size: Math.min(Math.max(size, v.per), v.per * NATAR_RICH.most) };
+}
+
 // For a target hit n times as often: the newest raid of ours on its way has done (n - 1) / n
 // of its trip, so the next one hits a 1 / n trip later.
 function oftenDue(key, n) {
@@ -447,10 +490,11 @@ function oftenDue(key, n) {
   return last.arrival - Date.now() / 1000 <= trip / n;
 }
 
-// [{ oasis, army }] for a village in mode 'natars': per v.unit to each Natar village within
-// v.radius that has no raid of ours on its way and is not in v.skip, closest first, as long as
-// that many are at home. A village in v.often ({ key: n }) hits n times as often: the next raid
-// goes once the last one on its way is (n - 1) / n of its trip there.
+// [{ oasis, army }] for a village in mode 'natars': v.unit to each Natar village within
+// v.radius that has no raid of ours on its way and is not left alone (v.skip or natarTarget),
+// closest first, as long as at least per are at home; natarTarget's size, or what is left.
+// A village in v.often ({ key: n }) hits n times as often: the next raid goes once the last
+// one on its way is (n - 1) / n of its trip there.
 // (oasis: the target, shaped as an oasis so the rest of the round treats both alike.)
 async function planNatars(v, village, home, busy) {
   const chosen = [];
@@ -458,9 +502,11 @@ async function planNatars(v, village, home, busy) {
   for (const n of await OasisService.natars(village, v.radius)) {
     if (left < v.per) break;
     const key = n.x + '|' + n.y;
-    if ((v.skip || []).includes(key) || (busy.has(key) && !oftenDue(key, (v.often || {})[key]))) continue;
-    chosen.push({ oasis: { ...n, stage: null, animals: [] }, army: { [v.unit]: v.per } });
-    left -= v.per;
+    const t = natarTarget(v, village, key);
+    if (t.skip || (busy.has(key) && !oftenDue(key, t.often))) continue;
+    const size = Math.min(t.size, left);
+    chosen.push({ oasis: { ...n, stage: null, animals: [] }, army: { [v.unit]: size } });
+    left -= size;
   }
   return chosen;
 }
@@ -533,6 +579,10 @@ async function round() {
         try {
           const arrival = await sendRaid(village, key, t.army, v.mode === 'natars' ? 'Natars' : 'Nature');
           busy.add(key);
+          for (const [u, n] of Object.entries(t.army)) {
+            homes[v.name][u] -= n;
+            if (home !== homes[v.name]) home[u] -= n;
+          }
           state.raids.push({
             key, village: village.name, mode: v.mode, stage: t.oasis.stage, army: t.army, sentAt: Date.now(), arrival,
             animals: Object.fromEntries(t.oasis.animals.map(a => [a.unit, a.count])),

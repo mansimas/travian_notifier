@@ -2,6 +2,10 @@
  * sails.config.travian - everything the attack watcher needs. Secrets come from .env (see
  * .env.example), which is never committed.
  */
+// Natar villages no entry raids (2026-10-23 reports, 24 h: -87|40 26 raids 0 loot; -94|47,
+// -89|49, -87|49, -97|48 under 50 loot per raid).
+const NATAR_SKIP = ['-87|40', '-94|47', '-89|49', '-87|49', '-97|48'];
+
 module.exports.travian = {
   watch: true,
 
@@ -44,11 +48,16 @@ module.exports.travian = {
       { name: 'mansim2', mode: 'animals', stages: 8, maxStages: 14 },
       // mansim1's horses go on where mansim2's horses ran out.
       { name: 'mansim1', mode: 'animals', cavOnly: true, stages: 8, maxStages: 14 },
-      // mansim3's Marksmen raid Natar villages: 10 each, within 37 fields (about 15 oasis
-      // stages: stage 14 ends at 36).
-      // skip: Natar villages never raided (-87|40: 26 raids, 0 loot, 2026-10-23).
+      // mansim3's Marksmen raid Natar villages: 10 each (more to rich ones, AutoRaidService
+      // natarTarget), within 37 fields (about 15 oasis stages: stage 14 ends at 36).
+      // skip: Natar villages never raided (NATAR_SKIP). Poor ones are also left alone by their
+      // reports for a while.
       // often: hits N times as often (-86|48 gave 60% of the Natar loot, 2026-10-23).
-      { name: 'mansim3', mode: 'natars', unit: 'u65', per: 10, radius: 37, skip: ['-87|40'], often: { '-86|48': 2 } },
+      { name: 'mansim3', mode: 'natars', unit: 'u65', per: 10, radius: 37, often: { '-86|48': 2 },
+        skip: NATAR_SKIP },
+      // Steppe Riders the animal raids left at home raid Natar villages too (2026-10-23).
+      { name: 'mansim2', mode: 'natars', unit: 'u64', per: 10, radius: 37, skip: NATAR_SKIP },
+      { name: 'mansim1', mode: 'natars', unit: 'u64', per: 10, radius: 37, skip: NATAR_SKIP },
     ],
     // No horses to an oasis our raids hit less than this long ago: right after a clear it refills
     // fast (2 wolves seen, 10 there on arrival, 2026-10-20).
