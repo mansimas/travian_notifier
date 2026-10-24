@@ -10,6 +10,7 @@ module.exports.bootstrap = function (cb) {
       sails.log.info('lifted on master, watching for attacks');
       NotifierService.start();
       AutoRaidService.start();
+      VillageWatchService.start();
     } else {
       sails.log.info('lifted, watcher off');
     }

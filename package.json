@@ -13,7 +13,9 @@
     "oases": "node scripts/run.js oases",
     "troops": "node scripts/run.js troops",
     "autoraid": "node scripts/run.js autoraid",
-    "reports-backfill": "node scripts/run.js reports-backfill"
+    "report": "node scripts/run.js report",
+    "reports-backfill": "node scripts/run.js reports-backfill",
+    "villages": "node scripts/run.js villages"
   },
   "repository": {
     "type": "git",

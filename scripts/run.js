@@ -7,6 +7,9 @@
  *                       animals of one oasis stage (1 = closest), saves .tmp/oases-<x>_<y>.json
  *   npm run troops      every troop of every village: home, outgoing, returning, reinforcing
  *   npm run autoraid    one auto raid round now (AUTO_RAID_SEND=0 for a dry run)
+ *   npm run villages -- [snap] [status]
+ *                       active/inactive villages around us from .tmp/villagewatch.json;
+ *                       snap: take a snapshot first
  *   npm run reports-backfill
  *                       every oasis raid report still in the game into .tmp/report-history.json,
  *                       slowly (one request every 3-6 s); run it again to go on
@@ -53,6 +56,27 @@ const commands = {
   autoraid: async function () {
     const log = await AutoRaidService.round();
     console.log(JSON.stringify(log, null, 1));
+  },
+  // npm run report -- <id>: one report as plain text (id as kept, e.g. 250912476|90b955f8).
+  report: async function () {
+    const id = process.argv[3];
+    let res = await TravianService.request('GET', '/report?id=' + encodeURIComponent(id));
+    if (!TravianService.loggedIn(res.body)) {
+      await TravianService.login();
+      res = await TravianService.request('GET', '/report?id=' + encodeURIComponent(id));
+    }
+    const html = res.body.slice(res.body.indexOf('id="reportWrapper"'));
+    console.log(html.slice(0, 60000).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').slice(0, 3000));
+  },
+  villages: async function () {
+    const args = process.argv.slice(3);
+    if (args.includes('snap')) console.log('snapshot: ' + JSON.stringify(await VillageWatchService.snapshot()));
+    const a = VillageWatchService.analysis({ status: args.find(s => s !== 'snap') });
+    console.log(a.snaps + ' snapshots ' + a.from + ' - ' + a.to + ', ' + JSON.stringify(a.counts));
+    for (const p of a.players) {
+      console.log('  ' + p.status.padEnd(8) + ' ' + p.player + (p.alliance ? ' [' + p.alliance + ']' : '') + ' pop ' + p.pop
+        + ' +' + p.gained24h + '/24h +' + p.gained72h + '/72h, last growth ' + (p.lastGrowth || '-') + ', ' + p.villages.join(' '));
+    }
   },
   'reports-backfill': async function () {
     console.log(JSON.stringify(await AutoRaidService.backfillReports()));

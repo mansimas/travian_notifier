@@ -375,6 +375,7 @@ module.exports = {
   serial,
   scan,
   natars,
+  coverArea,
   findVillage,
   requestBlock,
   tileAnimals,

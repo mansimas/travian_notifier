@@ -73,6 +73,17 @@ module.exports.travian = {
     pageGapSeconds: [1, 3],
   },
 
+  // VillageWatchService: every everyMinutes (random in the range) the population of every player
+  // village of at least minPop within radius fields of village (by name; oasisVillage when not
+  // set), to tell active players from inactive ones. GET /villages, npm run villages.
+  villageWatch: {
+    enabled: process.env.VILLAGE_WATCH !== '0',
+    village: process.env.VILLAGE_WATCH_VILLAGE || process.env.OASIS_VILLAGE,
+    radius: 30,
+    minPop: 200,
+    everyMinutes: [13, 17],
+  },
+
   // Times on the /mute page are shown in this zone.
   timezone: process.env.TIMEZONE || 'Europe/Vilnius',
 
