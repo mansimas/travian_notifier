@@ -415,8 +415,9 @@ async function onTheirWay(villages) {
 // Free oases of the village's stages from..to, not raided now, with what the map block shows:
 // [{ x, y, stage, distance, bonus, animals, resting }]. Oases found taken are remembered.
 // resting: our raids hit it less than horseRestMinutes ago, so it is still filling up (no horses).
-async function candidates(village, from, to, busy) {
-  const scan = await OasisService.scan(village);
+// scanFrom: the village whose oasis stages are used (v.oasesOf; the village itself when not set).
+async function candidates(village, from, to, busy, scanFrom = village) {
+  const scan = await OasisService.scan(scanFrom);
   const taken = OasisService.loadTaken();
   const list = scan.stages.filter(s => s.stage >= from && s.stage <= to).flatMap(s => s.oases.map(o => ({ ...o, stage: s.stage })))
     .filter(o => !taken[o.x + '|' + o.y] && !busy.has(o.x + '|' + o.y));
@@ -647,6 +648,18 @@ function planPlayers(v, village, home) {
   return chosen;
 }
 
+// What entry v may use of the troops at home: cavOnly raids with the horses alone (infantry has
+// its own entry); /stop_cav keeps all horses at home; /stop2cav, /stop2inf (/stop2 = both) that
+// village's horses or infantry. Made again from the live counts before each entry plans, so it
+// sees what the entries before sent.
+function homeOf(v, troops) {
+  const vs = (state.villageStops || {})[v.name] || {};
+  const home = { ...troops };
+  if (v.cavOnly || vs.inf) Object.assign(home, { u61: 0, u62: 0 });
+  if (state.cavStopped || vs.cav) Object.assign(home, { u64: 0, u65: 0, u66: 0 });
+  return home;
+}
+
 async function round() {
   const c = cfg();
   const log = { at: new Date().toISOString(), dryRun: !c.send, villages: {}, ...(state.cavStopped ? { cavStopped: true } : {}),
@@ -669,21 +682,17 @@ async function round() {
       const form = await page('GET', '/build.php?newdid=' + village.id + '&gid=16&tt=2');
       homes[v.name] = Object.fromEntries(Object.entries(SLOTS).map(([u, slot]) => [u, available(form, slot)]));
     }
-    // cavOnly: this entry raids with the horses alone (infantry has its own entry).
-    let home = v.cavOnly ? { ...homes[v.name], u61: 0, u62: 0 } : homes[v.name];
-    // /stop_cav: horses stay at home, infantry and Mercenaries go on.
-    if (state.cavStopped) home = { ...home, u64: 0, u65: 0, u66: 0 };
-    // /stop2cav, /stop2inf (/stop2 = both): that village's horses or infantry stay at home.
-    const vs = (state.villageStops || {})[v.name] || {};
-    if (vs.cav) home = { ...home, u64: 0, u65: 0, u66: 0 };
-    if (vs.inf) home = { ...home, u61: 0, u62: 0 };
+    const home = homeOf(v, homes[v.name]);
     const enough = v.mode === 'empty' ? (home[v.unit] || 0) >= Math.min(...Object.values(v.perStage))
       : v.mode === 'natars' ? (home[v.unit] || 0) >= v.per
       : v.mode === 'players' ? (home[v.unit] || 0) >= Math.min(...v.targets.map(t => t.n))
       : home.u61 + home.u62 >= RaidPlanService.INF_MIN || home.u64 + home.u65 + home.u66 >= RaidPlanService.CAV_MIN;
-    v.label = v.name + (v.cavOnly ? ' horses' : v.mode === 'natars' ? ' natars ' + v.unit : v.mode === 'players' ? ' players' : ''); // a village may have two natars entries
+    v.label = v.name + (v.cavOnly ? ' horses' + (v.oasesOf ? ' on ' + v.oasesOf : '') : v.mode === 'natars' ? ' natars ' + v.unit : v.mode === 'players' ? ' players' : ''); // a village may have two natars entries
     log.villages[v.label] = { mode: v.mode, home };
-    villages.push({ v, village, home, enough });
+    // oasesOf: raids the oases of another village's stages (mansim3's Marksmen farm mansim2's).
+    const scanFrom = v.oasesOf ? await OasisService.findVillage(v.oasesOf).catch(() => null) : village;
+    if (!scanFrom) continue;
+    villages.push({ v, village, enough, scanFrom });
     // Units the player raids need are held back from this village's later entries.
     if (v.mode === 'players') {
       holds[v.name] = { ...holds[v.name], [v.unit]: ((holds[v.name] || {})[v.unit] || 0) + playerHold(v, village) };
@@ -694,14 +703,15 @@ async function round() {
   if (villages.some(x => x.enough)) {
     const busy = await onTheirWay(villages.map(x => x.village));
     log.onTheirWay = busy.size;
-    for (const { v, village, home, enough } of villages) {
+    for (const { v, village, enough, scanFrom } of villages) {
       if (!enough) continue;
       const vlog = log.villages[v.label];
+      const home = homeOf(v, homes[v.name]);
       // What this entry may send: home less what the player raids hold back.
       const hold = v.mode === 'players' ? null : holds[v.name];
       const free = hold ? Object.fromEntries(Object.entries(home).map(([u, n]) => [u, Math.max(0, n - (hold[u] || 0))])) : home;
       if (hold) vlog.free = free;
-      let oases = v.mode === 'natars' || v.mode === 'players' ? [] : await candidates(village, 1, v.stages, busy);
+      let oases = v.mode === 'natars' || v.mode === 'players' ? [] : await candidates(village, 1, v.stages, busy, scanFrom);
       if (v.mode === 'animals') {
         // Enough horses left over for the next stage's minimum: one stage more and plan again, up to maxStages.
         const cavHome = free.u64 + free.u65 + free.u66;
@@ -711,7 +721,7 @@ async function round() {
             .reduce((s, { plan }) => s + (plan.kind === 'cav' ? Object.values(plan.army).reduce((a, n) => a + n, 0) : 0), 0);
           if (cavHome - used < RaidPlanService.cavMin(vlog.stages + 1)) break;
           vlog.stages++;
-          oases = oases.concat(await candidates(village, vlog.stages, vlog.stages, busy));
+          oases = oases.concat(await candidates(village, vlog.stages, vlog.stages, busy, scanFrom));
         }
       }
       const chosen = v.mode === 'empty' ? await planEmpty(v, free, oases, vlog)
@@ -734,7 +744,6 @@ async function round() {
           if (v.mode !== 'players') busy.add(key);
           for (const [u, n] of Object.entries(t.army)) {
             homes[v.name][u] -= n;
-            if (home !== homes[v.name]) home[u] -= n;
             if (v.mode === 'players') holds[v.name][u] = Math.max(0, holds[v.name][u] - n); // out now, not at home
           }
           state.raids.push({
