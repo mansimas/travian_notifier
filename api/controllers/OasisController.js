@@ -6,8 +6,21 @@
  * GET /autoraid   what the auto raids did (AutoRaidService.status), also loopback only.
  * GET /villages?status=inactive   active/slow/inactive villages and players around us
  * (VillageWatchService.analysis), also loopback only.
+ * GET /activity   per watched village the hours since its player last grew, for the oasis-dot
+ * plugin's map labels. Public as https://avogames.com/activity (nginx), no key, CORS for travian.com.
  */
+const TRAVIAN_ORIGIN = /^https:\/\/[a-z0-9.-]+\.travian\.com$/;
+
 module.exports = {
+  activity: function (req, res) {
+    const origin = req.headers.origin;
+    if (origin && TRAVIAN_ORIGIN.test(origin)) {
+      res.set('Access-Control-Allow-Origin', origin);
+      res.set('Vary', 'Origin');
+    }
+    return res.json(VillageWatchService.activity());
+  },
+
   villages: function (req, res) {
     if (req.headers['x-forwarded-for']) return res.forbidden(); // came through nginx
     return res.json(VillageWatchService.analysis({ status: req.query.status }));

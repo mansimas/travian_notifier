@@ -184,6 +184,22 @@ function analysis({ status } = {}) {
   };
 }
 
+// Compact analysis() for the plugin: { at, villages: { "x|y": [player, pop, h, watched, status] } },
+// h = hours since the player (any of their villages) last grew, null when never seen growing;
+// watched = hours the player has been watched; status of the player.
+function activity() {
+  const a = analysis();
+  const players = new Map(a.players.map(p => [p.uid, p]));
+  const villages = {};
+  for (const v of a.villages) {
+    if (v.gone) continue;
+    const p = players.get(v.uid);
+    const h = p.lastGrowth ? Math.round((Date.now() - Date.parse(p.lastGrowth)) / 360000) / 10 : null;
+    villages[v.x + '|' + v.y] = [v.player, v.pop, h, p.watchedHours, p.status];
+  }
+  return { at: a.to, villages };
+}
+
 async function loop() {
   for (;;) {
     try {
@@ -205,5 +221,6 @@ module.exports = {
   // One snapshot now (npm run villages -- snap).
   snapshot: () => OasisService.serial(snapshot),
   analysis,
+  activity,
   villageOf,
 };

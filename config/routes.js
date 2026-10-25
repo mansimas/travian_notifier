@@ -3,6 +3,7 @@ module.exports.routes = {
   'GET /oases': 'OasisController.stage',
   'GET /autoraid': 'OasisController.autoraid',
   'GET /villages': 'OasisController.villages',
+  'GET /activity': 'OasisController.activity',
   'GET /mute': 'StatusController.mute',
   'POST /mute': 'StatusController.mute',
   'GET /unmute': 'StatusController.unmute',

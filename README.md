@@ -45,7 +45,7 @@ On the server:
 nginx, inside the `listen 443` server block of `/etc/nginx/sites-available/avogames.com`, next to `location /`:
 
 ```nginx
-      location ~ ^/(mute|unmute|stop|start)$ {
+      location ~ ^/(mute|unmute|stop|start|stop_cav|start_cav|activity)$ {
           proxy_pass http://127.0.0.1:1421;   # travian_notifier (pm2: "TravianNotifier")
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
       }
