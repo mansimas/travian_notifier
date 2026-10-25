@@ -180,4 +180,14 @@ function plan(village, oases, troops, { extra = true } = {}) {
   return out;
 }
 
-module.exports = { plan, cavAllowed, isCrop, cavMin, B, INF_MIN, CAV_MIN };
+// Why horses do not raid oasis o (for the round log): crop, resting, ratio (points test), bonus
+// (kill bonus under MIN_GAIN), or losses (no group from the stage minimum fits the loss limits).
+function cavSkip(o) {
+  if (isCrop(o)) return 'crop';
+  if (o.resting) return 'resting';
+  if (!cavAllowed(o.animals)) return 'ratio';
+  if (B.simulate({ u66: 1e6 }, o.animals).gain < MIN_GAIN) return 'bonus';
+  return 'losses';
+}
+
+module.exports = { plan, cavSkip, cavAllowed, isCrop, cavMin, B, INF_MIN, CAV_MIN };

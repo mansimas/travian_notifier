@@ -515,6 +515,19 @@ async function planAnimals(v, village, home, oases, log) {
   const planFrom = list => RaidPlanService.plan(village, list.filter(o => o.animals.length), home)
     .map(({ oasis, plan }) => ({ oasis, army: plan.army, plan }));
   let chosen = planFrom(oases);
+  // Oases with animals that got no raid, by why horses would not go (log.skipped, e.g. ratio: 40).
+  const skipped = chosen => {
+    const raided = new Set(chosen.map(c => c.oasis.x + '|' + c.oasis.y));
+    log.skipped = {};
+    log.horsesLeft = ['u64', 'u65', 'u66'].reduce((s, u) => s + (home[u] || 0), 0)
+      - chosen.reduce((s, c) => s + ['u64', 'u65', 'u66'].reduce((a, u) => a + (c.army[u] || 0), 0), 0);
+    for (const o of oases) {
+      if (!o.animals.length || raided.has(o.x + '|' + o.y)) continue;
+      const why = RaidPlanService.cavSkip(o);
+      log.skipped[why] = (log.skipped[why] || 0) + 1;
+    }
+  };
+  skipped(chosen);
   if (!chosen.length) return chosen;
   const pick = chosen[Math.floor(Math.random() * chosen.length)];
   await pause(cfg().pageGapSeconds);
@@ -529,7 +542,9 @@ async function planAnimals(v, village, home, oases, log) {
     else fresh.push({ ...c.oasis, animals: t.animals });
   }
   log.check.replanned = fresh.length;
-  return planFrom(fresh);
+  chosen = planFrom(fresh);
+  skipped(chosen);
+  return chosen;
 }
 
 // Natar villages by their reports (since the last time one was left alone, all our villages):
