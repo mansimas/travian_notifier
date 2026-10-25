@@ -22,8 +22,9 @@
  *     - mode 'players': no oases; each of v.targets (player villages) gets n of v.unit every
  *       v.everyMinutes, not waiting for the last raid to come back (planPlayers). The units
  *       these raids keep busy are held back from the later entries of that village (playerHold);
- *       a target whose raid lost more than v.maxLoss of the army, or that changed owner, is left
- *       alone until /start;
+ *       a target whose raid lost more than v.maxLoss of the army, found troops there and brought
+ *       back less than 100, whose owner grew since our first raid (village watch), or that changed
+ *       owner, is left alone until /start;
  *  4. the raids are sent, with what was planned (for the evaluation in /autoraid);
  *  5. the newest oasis and Natar raid reports (read or not) are kept and matched to the raids sent; the
  *     ones that were unread are marked unread again, so you still see them as new in the game.
@@ -231,6 +232,10 @@ function parsePlayerReport(html, id, t) {
   const att = unitRows(body, 'u61');
   const bounty = text.match(/Bounty ([\d,]+) ([\d,]+) ([\d,]+) ([\d,]+) ([\d,]+)\s*\/\s*([\d,]+)/);
   const num = s => Number(String(s).replace(/,/g, ''));
+  // Defender troops: the first units row of the defender side (any tribe, its own unit header).
+  const defSide = body.slice(Math.max(0, body.indexOf('class="role defender"')));
+  const defFirst = (defSide.match(/class="unit (u\d+)"/) || [])[1];
+  const defenders = defFirst && body.includes('class="role defender"') ? (unitRows(defSide, defFirst)[0] || []).slice(0, 10).reduce((s, n) => s + n, 0) : 0;
   return {
     id, player: true, village: title[1], key: t.key, owner: t.owner,
     time: (text.match(/(\d\d\.\d\d\.\d\d, \d\d:\d\d:\d\d)/) || [])[1] || null,
@@ -239,6 +244,7 @@ function parsePlayerReport(html, id, t) {
     bounty: bounty ? [1, 2, 3, 4].reduce((s, i) => s + num(bounty[i]), 0) : 0,
     carried: bounty ? num(bounty[5]) : null,
     capacity: bounty ? num(bounty[6]) : null,
+    defenders,
     at: Date.now(),
   };
 }
@@ -246,13 +252,36 @@ function parsePlayerReport(html, id, t) {
 // The 'players' entries' targets: [{ key, n, owner, village, entry }].
 const playerTargets = () => cfg().villages.filter(v => v.mode === 'players').flatMap(v => v.targets.map(t => ({ ...t, entry: v })));
 
-// A player raid that lost more than its entry's maxLoss: that target is left alone until /start.
+// Leaves player target t alone until /start.
+function stopPlayer(t, reason) {
+  if (state.playerStops[t.key]) return;
+  state.playerStops[t.key] = { at: new Date().toISOString(), reason };
+  sails.log.error('autoraid: player raids on ' + t.key + ' (' + t.owner + ') stopped: ' + reason);
+}
+
+// A player raid that lost more than its entry's maxLoss, or found troops there and brought back
+// less than PLAYER_MIN_LOOT: that target is left alone until /start.
+const PLAYER_MIN_LOOT = 100;
 function checkPlayerReport(report, t) {
   const units = r => Object.values(r || {}).reduce((s, n) => s + n, 0);
   const sent = units(report.sent);
-  if (!sent || units(report.dead) <= (t.entry.maxLoss || 0) * sent || state.playerStops[t.key]) return;
-  state.playerStops[t.key] = { at: new Date().toISOString(), reason: 'lost ' + units(report.dead) + ' of ' + sent + ' (report ' + report.id + ')' };
-  sails.log.error('autoraid: player raids on ' + t.key + ' (' + t.owner + ') stopped: ' + state.playerStops[t.key].reason);
+  if (!sent) return;
+  if (units(report.dead) > (t.entry.maxLoss || 0) * sent) stopPlayer(t, 'lost ' + units(report.dead) + ' of ' + sent + ' (report ' + report.id + ')');
+  else if (report.defenders > 0 && report.bounty < PLAYER_MIN_LOOT) stopPlayer(t, report.defenders + ' troops there, loot ' + report.bounty + ' (report ' + report.id + ')');
+}
+
+// A player target whose owner grew (village watch, any of their villages) since our first raid
+// on it, or since the last /start: the player is active, so that target is left alone until /start.
+function checkPlayersActive() {
+  let villages;
+  try { villages = VillageWatchService.activity().villages; } catch (e) { return; }
+  for (const t of playerTargets()) {
+    const w = villages[t.key];
+    if (state.playerStops[t.key] || !w || w[2] == null) continue;
+    const grewAt = Date.now() - w[2] * 3600 * 1000;
+    const first = state.raids.filter(r => r.mode === 'players' && r.key === t.key).reduce((m, r) => Math.min(m, r.sentAt || Infinity), Infinity);
+    if (grewAt > Math.max(first, state.resumedAt || 0)) stopPlayer(t, 'player active, grew ' + w[2] + ' h ago');
+  }
 }
 
 // Marks these reports (ids as "221576689|f5f28980") unread again, as the list's read/unread
@@ -673,6 +702,7 @@ async function round() {
   // 1. Troops at home (one look per village, also when it has two entries).
   const villages = [];
   const homes = {};
+  checkPlayersActive();
   const holds = {}; // village name -> { unit: n } held back for the player raids
   for (const v of c.villages) {
     const village = await OasisService.findVillage(v.name).catch(() => null);
@@ -859,6 +889,7 @@ module.exports = {
     state.cavStopped = false;
     state.villageStops = {};
     state.playerStops = {};
+    state.resumedAt = Date.now(); // growth before this no longer stops a player target
     writeState();
     sails.log.verbose('autoraid: started');
   },
