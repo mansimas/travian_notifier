@@ -259,14 +259,14 @@ function stopPlayer(t, reason) {
   sails.log.error('autoraid: player raids on ' + t.key + ' (' + t.owner + ') stopped: ' + reason);
 }
 
-// A player raid that lost more than its entry's maxLoss, or found troops there and brought back
+// A player raid that lost more than its entry's maxLoss (share) or maxLossUnits (troops), or found troops there and brought back
 // less than PLAYER_MIN_LOOT: that target is left alone until /start.
 const PLAYER_MIN_LOOT = 100;
 function checkPlayerReport(report, t) {
   const units = r => Object.values(r || {}).reduce((s, n) => s + n, 0);
   const sent = units(report.sent);
   if (!sent) return;
-  if (units(report.dead) > (t.entry.maxLoss || 0) * sent) stopPlayer(t, 'lost ' + units(report.dead) + ' of ' + sent + ' (report ' + report.id + ')');
+  if (units(report.dead) > (t.entry.maxLoss || 0) * sent || units(report.dead) > (t.entry.maxLossUnits || Infinity)) stopPlayer(t, 'lost ' + units(report.dead) + ' of ' + sent + ' (report ' + report.id + ')');
   else if (report.defenders > 0 && report.bounty < PLAYER_MIN_LOOT) stopPlayer(t, report.defenders + ' troops there, loot ' + report.bounty + ' (report ' + report.id + ')');
 }
 

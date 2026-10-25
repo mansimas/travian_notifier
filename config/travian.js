@@ -49,8 +49,8 @@ module.exports.travian = {
       // waiting for the last raid to come back. The Marksmen these raids keep busy are held back
       // from mansim2's later entries, the rest raid oases. owner and village (name) as on the map:
       // the send checks the owner, the reports are found by the village name. A raid losing more
-      // than maxLoss of its army leaves that target alone until /start.
-      { name: 'mansim2', mode: 'players', unit: 'u65', everyMinutes: 60, maxLoss: 0.2, targets: [
+      // than maxLoss of its army or more than maxLossUnits troops leaves that target alone until /start.
+      { name: 'mansim2', mode: 'players', unit: 'u65', everyMinutes: 60, maxLoss: 0.2, maxLossUnits: 20, targets: [
         { key: '-86|60', n: 100, owner: 'old_marshall', village: 'GHETTO' },
         { key: '-78|49', n: 50, owner: 'lerchik', village: 'Деревня lerchik' },
         { key: '-117|33', n: 50, owner: 'Jerem', village: 'Village de Jerem' },
