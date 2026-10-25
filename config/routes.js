@@ -17,3 +17,12 @@ module.exports.routes = {
   'POST /start_cav': 'StatusController.startCav',
   'POST /unmute': 'StatusController.unmute',
 };
+// /stop2, /stop2cav, /stop2inf, /start2, ... per village mansim1-3 (StatusController.village).
+for (const n of [1, 2, 3]) {
+  for (const verb of ['stop', 'start']) {
+    for (const kind of ['', 'cav', 'inf']) {
+      module.exports.routes['GET /' + verb + n + kind] = 'StatusController.village';
+      module.exports.routes['POST /' + verb + n + kind] = 'StatusController.village';
+    }
+  }
+}

@@ -9,7 +9,9 @@
  * GET|POST /start    auto raids go on (also ends /stop_cav).
  * GET|POST /stop_cav  no more horse raids until /start_cav or /start; infantry and Mercenaries go on.
  * GET|POST /start_cav horse raids go on.
- * All public as https://avogames.com/mute, /unmute, /stop, /start, /stop_cav, /start_cav (nginx), no key - asked
+ * GET|POST /stop2     village mansim2 sends nothing until /start2 (or /start); /stop2cav only its horses,
+ *                     /stop2inf only its infantry. Same for 1 and 3. /start2cav, /start2inf undo one kind.
+ * All public as https://avogames.com/mute, /unmute, /stop, /start, /stop_cav, /start_cav, /stopN... (nginx), no key - asked
  * for that way.
  * Answered with a small page, as they are opened from the phone's browser.
  */
@@ -58,6 +60,20 @@ module.exports = {
     AutoRaidService.resumeCav();
     if (req.method === 'POST') return res.json({ ok: true, cavStopped: false });
     return page(res, 'Horse raids are on again.');
+  },
+
+  // /stop2, /stop2cav, /stop2inf, /start2, /start2cav, /start2inf (config/routes.js, villages 1-3).
+  village: function (req, res) {
+    const m = req.path.match(/^\/(stop|start)(\d)(cav|inf)?$/);
+    if (!m) return res.notFound();
+    const name = 'mansim' + m[2];
+    const kinds = m[3] ? [m[3]] : ['cav', 'inf'];
+    const vs = AutoRaidService.stopVillage(name, kinds, m[1] === 'stop');
+    if (req.method === 'POST') return res.json({ ok: true, village: name, stopped: vs });
+    const what = { cav: 'horses', inf: 'infantry' };
+    const stopped = Object.keys(vs).map(k => what[k]);
+    return page(res, name + ': ' + (stopped.length ? stopped.join(' and ') + ' stay at home. Open /start' + m[2] + ' to send again.'
+      : 'raids are on again.'));
   },
 
   unmute: function (req, res) {

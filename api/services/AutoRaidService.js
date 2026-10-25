@@ -37,7 +37,7 @@ const MAX_REPORTS_PER_ROUND = 15;
 const MAX_OUTGOING_PAGES = 20;
 const MINUTE = 60 * 1000;
 
-const EMPTY_STATE = { raids: [], reports: [], natarReports: [], natarSkip: {}, lastRound: null, stopped: false, cavStopped: false };
+const EMPTY_STATE = { raids: [], reports: [], natarReports: [], natarSkip: {}, lastRound: null, stopped: false, cavStopped: false, villageStops: {} };
 let state = { ...EMPTY_STATE };
 
 function readState() {
@@ -550,7 +550,8 @@ async function planNatars(v, village, home, busy) {
 
 async function round() {
   const c = cfg();
-  const log = { at: new Date().toISOString(), dryRun: !c.send, villages: {}, ...(state.cavStopped ? { cavStopped: true } : {}) };
+  const log = { at: new Date().toISOString(), dryRun: !c.send, villages: {}, ...(state.cavStopped ? { cavStopped: true } : {}),
+    ...(Object.keys(state.villageStops || {}).length ? { villageStops: state.villageStops } : {}) };
   if (state.stopped) {
     log.stopped = true;
     state.lastRound = log;
@@ -572,6 +573,10 @@ async function round() {
     let home = v.cavOnly ? { ...homes[v.name], u61: 0, u62: 0 } : homes[v.name];
     // /stop_cav: horses stay at home, infantry and Mercenaries go on.
     if (state.cavStopped) home = { ...home, u64: 0, u65: 0, u66: 0 };
+    // /stop2cav, /stop2inf (/stop2 = both): that village's horses or infantry stay at home.
+    const vs = (state.villageStops || {})[v.name] || {};
+    if (vs.cav) home = { ...home, u64: 0, u65: 0, u66: 0 };
+    if (vs.inf) home = { ...home, u61: 0, u62: 0 };
     const enough = v.mode === 'empty' ? (home[v.unit] || 0) >= Math.min(...Object.values(v.perStage))
       : v.mode === 'natars' ? (home[v.unit] || 0) >= v.per
       : home.u61 + home.u62 >= RaidPlanService.INF_MIN || home.u64 + home.u65 + home.u66 >= RaidPlanService.CAV_MIN;
@@ -700,7 +705,7 @@ module.exports = {
   },
 
   // /stop and /start: no sends until started again (rounds then only note that they are stopped).
-  // /start also ends /stop_cav.
+  // /start also ends /stop_cav and every /stopN.
   stop: function () {
     state.stopped = true;
     writeState();
@@ -709,6 +714,7 @@ module.exports = {
   resume: function () {
     state.stopped = false;
     state.cavStopped = false;
+    state.villageStops = {};
     writeState();
     sails.log.verbose('autoraid: started');
   },
@@ -723,6 +729,16 @@ module.exports = {
     writeState();
     sails.log.verbose('autoraid: horses started');
   },
+  // /stopN[cav|inf] and /startN[cav|inf]: one village (mansimN) only; kinds is ['cav', 'inf'] or one of them.
+  stopVillage: function (name, kinds, stop) {
+    state.villageStops = state.villageStops || {};
+    const vs = state.villageStops[name] = state.villageStops[name] || {};
+    for (const k of kinds) if (stop) vs[k] = true; else delete vs[k];
+    if (!vs.cav && !vs.inf) delete state.villageStops[name];
+    writeState();
+    sails.log.verbose('autoraid: ' + name + ' ' + kinds.join('+') + (stop ? ' stopped' : ' started'));
+    return state.villageStops[name] || {};
+  },
 
   status: function () {
     return {
@@ -730,6 +746,7 @@ module.exports = {
       send: cfg().send,
       stopped: state.stopped,
       cavStopped: state.cavStopped,
+      villageStops: state.villageStops,
       villages: cfg().villages,
       lastRound: state.lastRound,
       raidsSent: state.raids.length,
