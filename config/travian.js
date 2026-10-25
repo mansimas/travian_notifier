@@ -54,7 +54,7 @@ module.exports.travian = {
         { key: '-86|60', n: 100, owner: 'old_marshall', village: 'GHETTO' },
         { key: '-78|49', n: 50, owner: 'lerchik', village: 'Деревня lerchik' },
         { key: '-117|33', n: 50, owner: 'Jerem', village: 'Village de Jerem' },
-        { key: '-83|60', n: 50, owner: 'kurdesz', village: 'Osada: kurdesz' },
+        { key: '-83|60', n: 200, owner: 'kurdesz', village: 'Osada: kurdesz' },
       ] },
       { name: 'mansim2', mode: 'animals', stages: 8, maxStages: 14 },
       // mansim1's horses go on where mansim2's horses ran out.
