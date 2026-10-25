@@ -370,6 +370,7 @@ module.exports = {
     });
   },
 
+  api,
   parseAnimals,
   oasisOf,
   serial,

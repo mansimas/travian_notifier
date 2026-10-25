@@ -68,6 +68,13 @@ const commands = {
     const html = res.body.slice(res.body.indexOf('id="reportWrapper"'));
     console.log(html.slice(0, 60000).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').slice(0, 3000));
   },
+  // npm run tile -- <x> <y>: the map tile details (owner, population, troops) as plain text.
+  tile: async function () {
+    const [x, y] = process.argv.slice(3).map(Number);
+    const data = await OasisService.api('map/tile-details', { x, y });
+    const html = typeof data === 'string' ? data : (data && data.html) || '';
+    console.log(html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/[\u202a-\u202e\u200e\u200f]/g, '').replace(/\s+/g, ' ').slice(0, 1500));
+  },
   villages: async function () {
     const args = process.argv.slice(3);
     if (args.includes('snap')) console.log('snapshot: ' + JSON.stringify(await VillageWatchService.snapshot()));

@@ -34,7 +34,7 @@ module.exports.travian = {
   // Auto raids (AutoRaidService): every minMinutes..maxMinutes (random) each village raids
   // oases of its first stages as long as troops last. Mode 'empty': Mercenaries to empty oases,
   // perStage[stage] each. Mode 'animals': oases with animals, armies by RaidPlanService;
-  // cavOnly: with the horses alone. Mode 'natars': per units to each Natar village within radius. Entries go in this order, each on the oases left over.
+  // cavOnly: with the horses alone. Mode 'natars': per units to each Natar village within radius. Mode 'players': n units to each target every everyMinutes. Entries go in this order, each on the oases left over.
   // AUTO_RAID_SEND=0 = dry run: everything is read and logged, nothing is sent and no report
   // is opened. GET /stop and /start pause and resume the sends.
   autoRaid: {
@@ -45,6 +45,17 @@ module.exports.travian = {
       { name: 'mansim1', mode: 'empty', unit: 'u61', stages: 5, perStage: { 1: 50, 2: 50, 3: 100, 4: 100, 5: 100 }, restMinutes: 60 },
       // mansim3's Mercenaries go on with the empty oases mansim1 left, same rules.
       { name: 'mansim3', mode: 'empty', unit: 'u61', stages: 5, perStage: { 1: 50, 2: 50, 3: 100, 4: 100, 5: 100 }, restMinutes: 60 },
+      // mansim2's Marksmen raid player villages (user, 2026-10-25): n each every everyMinutes, not
+      // waiting for the last raid to come back. The Marksmen these raids keep busy are held back
+      // from mansim2's later entries, the rest raid oases. owner and village (name) as on the map:
+      // the send checks the owner, the reports are found by the village name. A raid losing more
+      // than maxLoss of its army leaves that target alone until /start.
+      { name: 'mansim2', mode: 'players', unit: 'u65', everyMinutes: 60, maxLoss: 0.2, targets: [
+        { key: '-86|60', n: 100, owner: 'old_marshall', village: 'GHETTO' },
+        { key: '-78|49', n: 50, owner: 'lerchik', village: 'Деревня lerchik' },
+        { key: '-117|33', n: 50, owner: 'Jerem', village: 'Village de Jerem' },
+        { key: '-83|60', n: 50, owner: 'kurdesz', village: 'Osada: kurdesz' },
+      ] },
       { name: 'mansim2', mode: 'animals', stages: 8, maxStages: 14 },
       // mansim1's horses go on where mansim2's horses ran out.
       { name: 'mansim1', mode: 'animals', cavOnly: true, stages: 8, maxStages: 14 },

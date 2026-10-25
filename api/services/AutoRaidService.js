@@ -19,6 +19,11 @@
  *       reports a poor village is left alone for a while, a slow one is hit once its bag has
  *       filled up, and one whose last raid came back full gets twice the army at once
  *       (natarTarget);
+ *     - mode 'players': no oases; each of v.targets (player villages) gets n of v.unit every
+ *       v.everyMinutes, not waiting for the last raid to come back (planPlayers). The units
+ *       these raids keep busy are held back from the later entries of that village (playerHold);
+ *       a target whose raid lost more than v.maxLoss of the army, or that changed owner, is left
+ *       alone until /start;
  *  4. the raids are sent, with what was planned (for the evaluation in /autoraid);
  *  5. the newest oasis and Natar raid reports (read or not) are kept and matched to the raids sent; the
  *     ones that were unread are marked unread again, so you still see them as new in the game.
@@ -37,7 +42,7 @@ const MAX_REPORTS_PER_ROUND = 15;
 const MAX_OUTGOING_PAGES = 20;
 const MINUTE = 60 * 1000;
 
-const EMPTY_STATE = { raids: [], reports: [], natarReports: [], natarSkip: {}, lastRound: null, stopped: false, cavStopped: false, villageStops: {} };
+const EMPTY_STATE = { raids: [], reports: [], natarReports: [], natarSkip: {}, playerReports: [], playerStops: {}, lastRound: null, stopped: false, cavStopped: false, villageStops: {} };
 let state = { ...EMPTY_STATE };
 
 function readState() {
@@ -48,6 +53,7 @@ function writeState() {
   state.raids = state.raids.slice(-KEEP);
   state.reports = state.reports.slice(-KEEP);
   state.natarReports = state.natarReports.slice(-KEEP);
+  state.playerReports = state.playerReports.slice(-KEEP);
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 1));
 }
@@ -213,6 +219,42 @@ function parseReport(html, id) {
   };
 }
 
+// Report of a raid on a player village (target t of a 'players' entry, found by its village name
+// in the title), or null.
+function parsePlayerReport(html, id, t) {
+  const start = html.indexOf('id="reportWrapper"');
+  const body = html.slice(start, start + 60000);
+  const text = plain(body);
+  const title = text.match(/(\S+) raids (.+?) \d\d\.\d\d\.\d\d, \d\d:\d\d:\d\d/);
+  if (!title || !title[2].includes(t.village)) return null;
+  const own = Array.from({ length: 10 }, (_, i) => 'u' + (61 + i));
+  const att = unitRows(body, 'u61');
+  const bounty = text.match(/Bounty ([\d,]+) ([\d,]+) ([\d,]+) ([\d,]+) ([\d,]+)\s*\/\s*([\d,]+)/);
+  const num = s => Number(String(s).replace(/,/g, ''));
+  return {
+    id, player: true, village: title[1], key: t.key, owner: t.owner,
+    time: (text.match(/(\d\d\.\d\d\.\d\d, \d\d:\d\d:\d\d)/) || [])[1] || null,
+    sent: toCounts(own, att[0]),
+    dead: toCounts(own, att[1]),
+    bounty: bounty ? [1, 2, 3, 4].reduce((s, i) => s + num(bounty[i]), 0) : 0,
+    carried: bounty ? num(bounty[5]) : null,
+    capacity: bounty ? num(bounty[6]) : null,
+    at: Date.now(),
+  };
+}
+
+// The 'players' entries' targets: [{ key, n, owner, village, entry }].
+const playerTargets = () => cfg().villages.filter(v => v.mode === 'players').flatMap(v => v.targets.map(t => ({ ...t, entry: v })));
+
+// A player raid that lost more than its entry's maxLoss: that target is left alone until /start.
+function checkPlayerReport(report, t) {
+  const units = r => Object.values(r || {}).reduce((s, n) => s + n, 0);
+  const sent = units(report.sent);
+  if (!sent || units(report.dead) <= (t.entry.maxLoss || 0) * sent || state.playerStops[t.key]) return;
+  state.playerStops[t.key] = { at: new Date().toISOString(), reason: 'lost ' + units(report.dead) + ' of ' + sent + ' (report ' + report.id + ')' };
+  sails.log.error('autoraid: player raids on ' + t.key + ' (' + t.owner + ') stopped: ' + state.playerStops[t.key].reason);
+}
+
 // Marks these reports (ids as "221576689|f5f28980") unread again, as the list's read/unread
 // toggle does. Opening a report marks it read; this puts back what the player has not seen yet.
 async function markUnread(ids) {
@@ -240,7 +282,10 @@ async function readReports() {
   let history = [];
   try { history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')); } catch (e) { /* no backfill yet */ }
   const saved = new Map(history.map(r => [r.id, r]));
-  const have = new Set(state.reports.concat(state.natarReports).map(r => r.id));
+  const have = new Set(state.reports.concat(state.natarReports, state.playerReports).map(r => r.id));
+  const targets = playerTargets();
+  // A player target the row's title names (village name after "raids").
+  const targetOf = row => targets.find(t => plain(row).includes(' raids ' + t.village));
   let read = 0;
   let capped = false;
   const unread = [];
@@ -249,7 +294,7 @@ async function readReports() {
       if (p > 1) await pause(cfg().pageGapSeconds);
       const list = await page('GET', '/report/offensive' + (p > 1 ? '?page=' + p : ''));
       const rows = [...list.matchAll(/<tr>\s*<td class="sel">[\s\S]*?<\/tr>/g)].map(m => m[0])
-        .filter(r => /raids (Unoccupied oasis|Natars)/.test(plain(r)));
+        .filter(r => /raids (Unoccupied oasis|Natars)/.test(plain(r)) || targetOf(r));
       let fresh = 0;
       for (const row of rows) {
         const href = (row.match(/href="\?(id=[^"]+)"/) || [])[1];
@@ -258,7 +303,8 @@ async function readReports() {
         const id = decodeURIComponent(query.match(/id=([^&]+)/)[1]);
         if (have.has(id)) continue;
         fresh++;
-        let report = saved.get(id);
+        const target = targetOf(row);
+        let report = target ? null : saved.get(id);
         if (!report) {
           if (read >= MAX_REPORTS_PER_ROUND) {
             capped = true;
@@ -266,10 +312,17 @@ async function readReports() {
           }
           await pause(cfg().pageGapSeconds);
           if (/messageStatusUnread/.test(row)) unread.push(id);
-          report = parseReport(await page('GET', '/report?' + query), id);
+          const html = await page('GET', '/report?' + query);
+          report = target ? parsePlayerReport(html, id, target) : parseReport(html, id);
           read++;
         }
         if (!report) continue;
+        if (report.player) {
+          state.playerReports.push(report);
+          have.add(id);
+          checkPlayerReport(report, target);
+          continue;
+        }
         (report.natars ? state.natarReports : state.reports).push(report);
         have.add(id);
         matchReport(report);
@@ -548,6 +601,52 @@ async function planNatars(v, village, home, busy) {
   return chosen;
 }
 
+const wrap = v => ((((v + 200) % 401) + 401) % 401) - 200; // map edge to edge
+
+// Player raids of village `name` to `key` (all of them, sent by the 'players' entries).
+const playerRaids = (name, key) => state.raids.filter(r => r.mode === 'players' && r.village === name && r.key === key);
+
+// Hours one way from village to target t with v.unit: the last raid's real trip (tournament
+// square and all), else distance / speed.
+function playerTrip(v, village, t) {
+  const last = playerRaids(village.name, t.key).filter(r => r.arrival && r.sentAt).pop();
+  if (last) return (last.arrival * 1000 - last.sentAt) / (60 * MINUTE);
+  const [x, y] = t.key.split('|').map(Number);
+  return Math.hypot(wrap(x - village.x), wrap(y - village.y)) / RaidPlanService.B.UNITS[v.unit].speed;
+}
+
+// Units of v.unit to keep at home for the player raids: per target, n for every raid that is
+// out at once (a send every everyMinutes over a round trip), less the ones out on those raids now.
+function playerHold(v, village) {
+  let hold = 0;
+  for (const t of v.targets) {
+    if (state.playerStops[t.key]) continue;
+    const roundTrip = 2 * playerTrip(v, village, t) * 60;
+    const need = t.n * Math.ceil(roundTrip / v.everyMinutes);
+    const out = playerRaids(village.name, t.key)
+      .filter(r => r.arrival && 2 * r.arrival * 1000 - r.sentAt > Date.now())
+      .reduce((s, r) => s + (r.army[v.unit] || 0), 0);
+    hold += Math.max(0, need - out);
+  }
+  return hold;
+}
+
+// [{ oasis, army, owner }] for a village in mode 'players': n of v.unit to each target whose last
+// raid from here went at least everyMinutes ago, as long as n are at home.
+function planPlayers(v, village, home) {
+  const chosen = [];
+  let left = home[v.unit] || 0;
+  for (const t of v.targets) {
+    if (state.playerStops[t.key] || left < t.n) continue;
+    const last = playerRaids(village.name, t.key).reduce((m, r) => Math.max(m, r.sentAt || 0), 0);
+    if (Date.now() - last < v.everyMinutes * MINUTE) continue;
+    const [x, y] = t.key.split('|').map(Number);
+    chosen.push({ oasis: { x, y, stage: null, animals: [] }, army: { [v.unit]: t.n }, owner: t.owner });
+    left -= t.n;
+  }
+  return chosen;
+}
+
 async function round() {
   const c = cfg();
   const log = { at: new Date().toISOString(), dryRun: !c.send, villages: {}, ...(state.cavStopped ? { cavStopped: true } : {}),
@@ -561,6 +660,7 @@ async function round() {
   // 1. Troops at home (one look per village, also when it has two entries).
   const villages = [];
   const homes = {};
+  const holds = {}; // village name -> { unit: n } held back for the player raids
   for (const v of c.villages) {
     const village = await OasisService.findVillage(v.name).catch(() => null);
     if (!village) continue;
@@ -579,10 +679,16 @@ async function round() {
     if (vs.inf) home = { ...home, u61: 0, u62: 0 };
     const enough = v.mode === 'empty' ? (home[v.unit] || 0) >= Math.min(...Object.values(v.perStage))
       : v.mode === 'natars' ? (home[v.unit] || 0) >= v.per
+      : v.mode === 'players' ? (home[v.unit] || 0) >= Math.min(...v.targets.map(t => t.n))
       : home.u61 + home.u62 >= RaidPlanService.INF_MIN || home.u64 + home.u65 + home.u66 >= RaidPlanService.CAV_MIN;
-    v.label = v.name + (v.cavOnly ? ' horses' : v.mode === 'natars' ? ' natars ' + v.unit : ''); // a village may have two natars entries
+    v.label = v.name + (v.cavOnly ? ' horses' : v.mode === 'natars' ? ' natars ' + v.unit : v.mode === 'players' ? ' players' : ''); // a village may have two natars entries
     log.villages[v.label] = { mode: v.mode, home };
     villages.push({ v, village, home, enough });
+    // Units the player raids need are held back from this village's later entries.
+    if (v.mode === 'players') {
+      holds[v.name] = { ...holds[v.name], [v.unit]: ((holds[v.name] || {})[v.unit] || 0) + playerHold(v, village) };
+      log.villages[v.label].hold = holds[v.name][v.unit];
+    }
   }
   // 2.-4. Plan and send, village after village.
   if (villages.some(x => x.enough)) {
@@ -591,39 +697,45 @@ async function round() {
     for (const { v, village, home, enough } of villages) {
       if (!enough) continue;
       const vlog = log.villages[v.label];
-      let oases = v.mode === 'natars' ? [] : await candidates(village, 1, v.stages, busy);
+      // What this entry may send: home less what the player raids hold back.
+      const hold = v.mode === 'players' ? null : holds[v.name];
+      const free = hold ? Object.fromEntries(Object.entries(home).map(([u, n]) => [u, Math.max(0, n - (hold[u] || 0))])) : home;
+      if (hold) vlog.free = free;
+      let oases = v.mode === 'natars' || v.mode === 'players' ? [] : await candidates(village, 1, v.stages, busy);
       if (v.mode === 'animals') {
         // Enough horses left over for the next stage's minimum: one stage more and plan again, up to maxStages.
-        const cavHome = home.u64 + home.u65 + home.u66;
+        const cavHome = free.u64 + free.u65 + free.u66;
         vlog.stages = v.stages;
         while (vlog.stages < v.maxStages) {
-          const used = RaidPlanService.plan(village, oases.filter(o => o.animals.length), home, { extra: false })
+          const used = RaidPlanService.plan(village, oases.filter(o => o.animals.length), free, { extra: false })
             .reduce((s, { plan }) => s + (plan.kind === 'cav' ? Object.values(plan.army).reduce((a, n) => a + n, 0) : 0), 0);
           if (cavHome - used < RaidPlanService.cavMin(vlog.stages + 1)) break;
           vlog.stages++;
           oases = oases.concat(await candidates(village, vlog.stages, vlog.stages, busy));
         }
       }
-      const chosen = v.mode === 'empty' ? await planEmpty(v, home, oases, vlog)
-        : v.mode === 'natars' ? await planNatars(v, village, home, busy)
-        : await planAnimals(v, village, home, oases, vlog);
+      const chosen = v.mode === 'empty' ? await planEmpty(v, free, oases, vlog)
+        : v.mode === 'natars' ? await planNatars(v, village, free, busy)
+        : v.mode === 'players' ? planPlayers(v, village, home)
+        : await planAnimals(v, village, free, oases, vlog);
       vlog.targets = chosen.map(t => ({
         key: t.oasis.x + '|' + t.oasis.y, stage: t.oasis.stage, distance: t.oasis.distance, army: t.army,
         animals: t.oasis.animals.map(a => a.count + ' ' + a.unit).join(', '),
         ...(t.plan ? { pass: t.plan.pass, dead: t.plan.totalDeaths, gain: t.plan.gain, lost: Math.round(t.plan.lostRes) } : {}),
       }));
       vlog.sent = [];
-      for (const t of chosen) busy.add(t.oasis.x + '|' + t.oasis.y); // later entries go on with the next oases
+      if (v.mode !== 'players') for (const t of chosen) busy.add(t.oasis.x + '|' + t.oasis.y); // later entries go on with the next oases
       for (const t of chosen) {
         const key = t.oasis.x + '|' + t.oasis.y;
         if (!c.send) continue;
         await pause(c.sendGapSeconds);
         try {
-          const arrival = await sendRaid(village, key, t.army, v.mode === 'natars' ? 'Natars' : 'Nature');
-          busy.add(key);
+          const arrival = await sendRaid(village, key, t.army, t.owner || (v.mode === 'natars' ? 'Natars' : 'Nature'));
+          if (v.mode !== 'players') busy.add(key);
           for (const [u, n] of Object.entries(t.army)) {
             homes[v.name][u] -= n;
             if (home !== homes[v.name]) home[u] -= n;
+            if (v.mode === 'players') holds[v.name][u] = Math.max(0, holds[v.name][u] - n); // out now, not at home
           }
           state.raids.push({
             key, village: village.name, mode: v.mode, stage: t.oasis.stage, army: t.army, sentAt: Date.now(), arrival,
@@ -633,6 +745,11 @@ async function round() {
           vlog.sent.push(key);
         } catch (e) {
           vlog.error = key + ': ' + e.message;
+          if (v.mode === 'players' && /target is not/.test(e.message)) {
+            state.playerStops[key] = { at: new Date().toISOString(), reason: e.message };
+            sails.log.error('autoraid: player raids on ' + key + ' stopped: ' + e.message);
+            continue;
+          }
           sails.log.error('autoraid: ' + village.name + ' send to ' + key + ' failed: ' + e.message);
           break;
         }
@@ -689,6 +806,23 @@ function evaluation() {
   return byMode;
 }
 
+// Per player target: raids sent, reports, loot and losses of the last 24 h, stopped or not.
+function playerStatus() {
+  const since = Date.now() - 24 * 60 * MINUTE;
+  const units = r => Object.values(r || {}).reduce((s, n) => s + n, 0);
+  return Object.fromEntries(playerTargets().map(t => {
+    const reports = state.playerReports.filter(r => r.key === t.key && r.at > since);
+    return [t.key, {
+      owner: t.owner, n: t.n,
+      sent24h: state.raids.filter(r => r.mode === 'players' && r.key === t.key && r.sentAt > since).length,
+      reports24h: reports.length,
+      loot24h: reports.reduce((s, r) => s + r.bounty, 0),
+      dead24h: reports.reduce((s, r) => s + units(r.dead), 0),
+      ...(state.playerStops[t.key] ? { stopped: state.playerStops[t.key] } : {}),
+    }];
+  }));
+}
+
 module.exports = {
   start: function () {
     if (!cfg().enabled) return;
@@ -705,7 +839,7 @@ module.exports = {
   },
 
   // /stop and /start: no sends until started again (rounds then only note that they are stopped).
-  // /start also ends /stop_cav and every /stopN.
+  // /start also ends /stop_cav, every /stopN and the player targets left alone after losses.
   stop: function () {
     state.stopped = true;
     writeState();
@@ -715,6 +849,7 @@ module.exports = {
     state.stopped = false;
     state.cavStopped = false;
     state.villageStops = {};
+    state.playerStops = {};
     writeState();
     sails.log.verbose('autoraid: started');
   },
@@ -754,6 +889,7 @@ module.exports = {
       reportsRead: state.reports.length,
       evaluation: evaluation(),
       lastReports: state.reports.slice(-10),
+      players: playerStatus(),
     };
   },
 
