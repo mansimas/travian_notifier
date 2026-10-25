@@ -16,7 +16,8 @@
  *       differs, every chosen oasis is asked one by one and the plan made again;
  *     - mode 'natars': no oases; `per` v.unit to each Natar village within `radius` fields
  *       (OasisService.natars) with no raid of ours on its way, closest first; by the Natar
- *       reports a poor village is left alone for a while and a rich one gets more, more often
+ *       reports a poor village is left alone for a while, a slow one is hit once its bag has
+ *       filled up, and one whose last raid came back full gets twice the army at once
  *       (natarTarget);
  *  4. the raids are sent, with what was planned (for the evaluation in /autoraid);
  *  5. the newest oasis and Natar raid reports (read or not) are kept and matched to the raids sent; the
@@ -450,14 +451,33 @@ async function planAnimals(v, village, home, oases, log) {
 
 // Natar villages by their reports (since the last time one was left alone, all our villages):
 // NATAR_POOR.raids raids in a row under NATAR_POOR.loot each on average -> left alone for
-// NATAR_POOR.days, then tried again; the last NATAR_RICH.raids all at least NATAR_RICH.fill full
-// -> twice the army (up to NATAR_RICH.most times per) and twice as often. A raid back under
-// half full halves the army again (not under per). 2026-10-23: of 11 Natar villages raided,
-// one gave 60% of the loot and five under 50 per raid.
+// NATAR_POOR.days, then tried again with NATAR_RICH.most times per (3 days' stock). The last
+// report at least NATAR_RICH.fill full -> the next raid goes now (also with one on its way) with
+// twice the army (up to NATAR_RICH.most times per); a raid back under half full halves it again
+// (not under per). A village making under NATAR_SLOW.rate an hour is hit only once a bag of the
+// army has filled up there (at most NATAR_SLOW.hours). 2026-10-25: full raids were always the
+// first hit after a pause (-103|52 750, 1050, 948, then 42); 62% of the Natar raids went to
+// villages giving under 100 a raid; -86|48 alone 680 an hour.
 const NATAR_POOR = { raids: 10, loot: 50, days: 3 };
-const NATAR_RICH = { raids: 3, fill: 0.9, most: 4 };
+const NATAR_RICH = { fill: 0.9, most: 4 };
+const NATAR_SLOW = { rate: 100, hours: 24, reports: 10 };
 
-// { skip, often, size } for a Natar village raided by entry v (size: units of v.unit to send).
+// Report time "25.10.26, 07:09:01" (server time) -> ms, to compare reports with each other.
+function reportTime(r) {
+  const m = (r.time || '').match(/(\d\d)\.(\d\d)\.(\d\d), (\d\d):(\d\d):(\d\d)/);
+  return m ? Date.UTC(2000 + Number(m[3]), m[2] - 1, m[1], m[4], m[5], m[6]) : null;
+}
+
+// Resources an hour the village gave over its last NATAR_SLOW.reports reports, or null.
+function natarRate(reports) {
+  const last = reports.slice(-NATAR_SLOW.reports);
+  if (last.length < 3) return null;
+  const hours = (reportTime(last[last.length - 1]) - reportTime(last[0])) / (60 * MINUTE);
+  return hours > 0 ? last.slice(1).reduce((t, r) => t + r.bounty, 0) / hours : null;
+}
+
+// { skip, often, size, now, wait } for a Natar village raided by entry v (size: units of v.unit
+// to send; now: send even with a raid on its way; wait: hours between hits, for a slow one).
 function natarTarget(v, village, key) {
   const since = state.natarSkip[key] || 0;
   if (since > Date.now()) return { skip: true };
@@ -470,14 +490,21 @@ function natarTarget(v, village, key) {
     return { skip: true };
   }
   const fill = r => (r.capacity ? r.bounty / r.capacity : 0);
-  const lastRich = reports.slice(-NATAR_RICH.raids);
-  const rich = lastRich.length === NATAR_RICH.raids && lastRich.every(r => fill(r) >= NATAR_RICH.fill);
+  const latest = reports[reports.length - 1];
+  const full = !!latest && fill(latest) >= NATAR_RICH.fill;
+  // Followed up already: a raid of ours left after the full report was read.
+  const now = full && !state.raids.some(r => r.key === key && r.sentAt > latest.at);
   const own = reports.filter(r => r.village === village.name && r.sent[v.unit]);
   const last = own[own.length - 1];
   let size = last ? last.sent[v.unit] : v.per;
-  if (last && rich) size *= 2;
+  if (since && !reports.length) size = v.per * NATAR_RICH.most; // back after being left alone
+  else if (full) size = Math.max(size, v.per) * 2;
   else if (last && fill(last) < 0.5) size = Math.floor(size / 2);
-  return { skip: (v.skip || []).includes(key), often: Math.max((v.often || {})[key] || 1, rich ? 2 : 1), size: Math.min(Math.max(size, v.per), v.per * NATAR_RICH.most) };
+  size = Math.min(Math.max(size, v.per), v.per * NATAR_RICH.most);
+  const rate = natarRate(reports);
+  const carry = size * RaidPlanService.B.UNITS[v.unit].carry;
+  const wait = !full && rate !== null && rate < NATAR_SLOW.rate ? Math.min(NATAR_SLOW.hours, carry / Math.max(rate, 1)) : 0;
+  return { skip: (v.skip || []).includes(key), often: (v.often || {})[key] || 1, size, now, wait };
 }
 
 // For a target hit n times as often: the newest raid of ours on its way has done (n - 1) / n
@@ -490,9 +517,17 @@ function oftenDue(key, n) {
   return last.arrival - Date.now() / 1000 <= trip / n;
 }
 
+// A slow Natar village: the new raid (trip hours there) lands at least wait hours after our
+// last raid hit it.
+function slowDue(key, wait, trip) {
+  const hit = lastHits()[key];
+  return !hit || Date.now() + trip * 60 * MINUTE >= hit + wait * 60 * MINUTE;
+}
+
 // [{ oasis, army }] for a village in mode 'natars': v.unit to each Natar village within
-// v.radius that has no raid of ours on its way and is not left alone (v.skip or natarTarget),
-// closest first, as long as at least per are at home; natarTarget's size, or what is left.
+// v.radius that has no raid of ours on its way (unless its last report came back full) and is
+// not left alone (v.skip or natarTarget), a slow one only once its bag has filled up, closest
+// first, as long as at least per are at home; natarTarget's size, or what is left.
 // A village in v.often ({ key: n }) hits n times as often: the next raid goes once the last
 // one on its way is (n - 1) / n of its trip there. v.single: never a second raid on its way
 // (no often, also not for a rich village).
@@ -504,7 +539,8 @@ async function planNatars(v, village, home, busy) {
     if (left < v.per) break;
     const key = n.x + '|' + n.y;
     const t = natarTarget(v, village, key);
-    if (t.skip || (busy.has(key) && (v.single || !oftenDue(key, t.often)))) continue;
+    if (t.skip || (busy.has(key) && (v.single || !(t.now || oftenDue(key, t.often))))) continue;
+    if (t.wait && !slowDue(key, t.wait, n.distance / RaidPlanService.B.UNITS[v.unit].speed)) continue;
     const size = Math.min(t.size, left);
     chosen.push({ oasis: { ...n, stage: null, animals: [] }, army: { [v.unit]: size } });
     left -= size;
