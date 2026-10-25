@@ -79,7 +79,7 @@ module.exports.travian = {
   villageWatch: {
     enabled: process.env.VILLAGE_WATCH !== '0',
     village: process.env.VILLAGE_WATCH_VILLAGE || process.env.OASIS_VILLAGE,
-    radius: 30,
+    radius: 50, // up to ~25 map requests per snapshot (30: 9)
     minPop: 200,
     everyMinutes: [13, 17],
   },
