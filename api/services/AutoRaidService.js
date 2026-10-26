@@ -685,6 +685,7 @@ function playerTrip(v, village, t) {
 // village's production (kurdesz 200 Marksmen for ~7k, 100 carry 10.5k).
 const PLAYER_SIZE = { margin: 1.3, reports: 3, min: 30, full: 0.9, first: 50 };
 function playerArmy(v, t) {
+  if (t.fixed) return t.n;
   const n = Math.min(t.n, PLAYER_SIZE.first);
   const last = state.playerReports.filter(r => r.key === t.key && r.capacity).slice(-PLAYER_SIZE.reports);
   if (!last.length) return n;

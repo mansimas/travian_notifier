@@ -50,13 +50,16 @@ module.exports.travian = {
       // from mansim2's later entries, the rest raid oases. owner and village (name) as on the map:
       // the send checks the owner, the reports are found by the village name. A raid losing more
       // than maxLoss of its army or more than maxLossUnits troops leaves that target alone until /start.
-      // n: the most a raid takes; the army is sized by the last loot (AutoRaidService playerArmy).
+      // n: the most a raid takes; the army is sized by the last loot (AutoRaidService playerArmy),
+      // or always n with fixed.
       { name: 'mansim2', mode: 'players', unit: 'u65', everyMinutes: 60, maxLoss: 0.2, maxLossUnits: 20, targets: [
         { key: '-86|60', n: 100, owner: 'old_marshall', village: 'GHETTO' },
         { key: '-78|49', n: 50, owner: 'lerchik', village: 'Деревня lerchik' },
         { key: '-117|33', n: 50, owner: 'Jerem', village: 'Village de Jerem' },
         { key: '-83|60', n: 200, owner: 'kurdesz', village: 'Osada: kurdesz' },
         { key: '-86|57', n: 100, owner: 'kurdesz', village: 'Nowa osada' },
+        // fixed: always n, not sized by the loot (user, 2026-10-26: 200 every hour).
+        { key: '-117|82', n: 200, fixed: true, owner: 'Kladde', village: 'Thuine' },
       ] },
       { name: 'mansim2', mode: 'animals', stages: 8, maxStages: 14 },
       // mansim1's horses go on where mansim2's horses ran out.
