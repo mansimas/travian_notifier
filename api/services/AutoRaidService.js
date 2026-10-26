@@ -20,7 +20,7 @@
  *       filled up, and one whose last raid came back full gets twice the army at once
  *       (natarTarget);
  *     - mode 'players': no oases; each of v.targets (player villages) gets n of v.unit every
- *       v.everyMinutes, not waiting for the last raid to come back (planPlayers). The units
+ *       v.everyMinutes (or the target's own), not waiting for the last raid to come back (planPlayers). The units
  *       these raids keep busy are held back from the later entries of that village (playerHold);
  *       a target whose raid lost more than v.maxLoss of the army, found troops there and brought
  *       back less than 100, whose owner grew since our first raid (village watch), or that changed
@@ -711,7 +711,7 @@ function playerHold(v, village) {
   for (const t of v.targets) {
     if (state.playerStops[t.key]) continue;
     const roundTrip = 2 * playerTrip(v, village, t) * 60;
-    const need = playerArmy(v, t) * Math.ceil(roundTrip / v.everyMinutes);
+    const need = playerArmy(v, t) * Math.ceil(roundTrip / (t.everyMinutes || v.everyMinutes));
     const out = playerOut(v, village, t);
     hold += Math.max(0, (t.maxOut ? Math.min(need, t.maxOut) : need) - out);
   }
@@ -727,7 +727,7 @@ function planPlayers(v, village, home) {
     const n = playerArmy(v, t);
     if (state.playerStops[t.key] || left < n) continue;
     const last = playerRaids(village.name, t.key).reduce((m, r) => Math.max(m, r.sentAt || 0), 0);
-    if (Date.now() - last < v.everyMinutes * MINUTE) continue;
+    if (Date.now() - last < (t.everyMinutes || v.everyMinutes) * MINUTE) continue;
     if (t.maxOut && playerOut(v, village, t) + n > t.maxOut) continue;
     const [x, y] = t.key.split('|').map(Number);
     chosen.push({ oasis: { x, y, stage: null, animals: [] }, army: { [v.unit]: n }, owner: t.owner });
