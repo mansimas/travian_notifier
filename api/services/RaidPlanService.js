@@ -23,6 +23,8 @@
  *  - the points test only keeps horses out: infantry may raid any oasis;
  *  - no oasis whose kill bonus is under MIN_GAIN: not worth the troops' time;
  *  - no horse group over CAV_MAX.
+ *  - an oasis someone else cleared before our last raid came (o.cleared, 2026-10-26) is planned
+ *    after all others and gets no second-pass infantry trip.
  * Troops left after that get a second pass (2026-10-20) over the oases still free: infantry trips
  * up to EXTRA_INF_HOURS, cavalry armies grown by EXTRA_CAV_GROWTH per stage band beyond stage 4
  * (stages 5-6 x1.2, 7-8 x1.44, 9-10 x1.728, ...).
@@ -147,9 +149,9 @@ function plan(village, oases, troops, { extra = true } = {}) {
   };
   const distance = o => Math.hypot(wrap(o.x - village.x), wrap(o.y - village.y));
   const infPass = (maxHours, pass) => {
-    for (const o of [...oases].sort((a, b) => (isCrop(b) - isCrop(a)) || distance(a) - distance(b))) {
+    for (const o of [...oases].sort((a, b) => (!!a.cleared - !!b.cleared) || (isCrop(b) - isCrop(a)) || distance(a) - distance(b))) {
       if (INF.reduce((s, u) => s + (left[u] || 0), 0) < INF_MIN) break;
-      if (used.has(o)) continue;
+      if (used.has(o) || (pass > 1 && o.cleared)) continue; // no long trip to an oasis someone else farms
       const p = planKind(village, o, left, 'inf', maxHours);
       if (p) take(o, { ...p, pass });
     }
@@ -163,7 +165,7 @@ function plan(village, oases, troops, { extra = true } = {}) {
     const cavOrder = oases.filter(o => !used.has(o) && !isCrop(o))
       .map(o => ({ o, net: (cavPlan(o) || { net: -Infinity }).net }))
       .filter(x => x.net > -Infinity)
-      .sort((a, b) => b.net - a.net);
+      .sort((a, b) => (!!a.o.cleared - !!b.o.cleared) || b.net - a.net);
     let sent = 0;
     for (const { o } of cavOrder) {
       const p = cavPlan(o);

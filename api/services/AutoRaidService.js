@@ -444,6 +444,7 @@ async function onTheirWay(villages) {
 // Free oases of the village's stages from..to, not raided now, with what the map block shows:
 // [{ x, y, stage, distance, bonus, animals, resting }]. Oases found taken are remembered.
 // resting: our raids hit it less than horseRestMinutes ago, so it is still filling up (no horses).
+// cleared: someone else cleared it before our raid came (clearedOases), planned last.
 // scanFrom: the village whose oasis stages are used (v.oasesOf; the village itself when not set).
 async function candidates(village, from, to, busy, scanFrom = village) {
   const scan = await OasisService.scan(scanFrom);
@@ -456,6 +457,7 @@ async function candidates(village, from, to, busy, scanFrom = village) {
   const out = [];
   const nowTaken = [];
   const hits = lastHits();
+  const cleared = clearedOases();
   for (const o of list) {
     const t = tiles.get(o.x + '|' + o.y);
     if (!t) continue;
@@ -465,9 +467,25 @@ async function candidates(village, from, to, busy, scanFrom = village) {
       continue;
     }
     const resting = Date.now() - (hits[o.x + '|' + o.y] || 0) < cfg().horseRestMinutes * MINUTE;
-    out.push({ ...o, animals: OasisService.parseAnimals(t.text), resting });
+    out.push({ ...o, animals: OasisService.parseAnimals(t.text), resting, cleared: cleared.has(o.x + '|' + o.y) });
   }
   if (nowTaken.length) OasisService.recordTaken(nowTaken);
+  return out;
+}
+
+// Oases where one of our animal raids arriving in the last CLEARED_HOURS found no animals,
+// though there were some when it went: someone else farms them. 2026-10-26: 62 of 509 animal
+// raids came to a cleared oasis (17 of them 200 Mercenaries on 3 h trips); within 12 h after one,
+// 8 of 19 raids there did too.
+const CLEARED_HOURS = 12;
+function clearedOases() {
+  const since = Date.now() - CLEARED_HOURS * 60 * MINUTE;
+  const reports = new Map(state.reports.map(r => [r.id, r]));
+  const out = new Set();
+  for (const r of state.raids) {
+    const rep = r.mode === 'animals' && r.arrival * 1000 > since && reports.get(r.reportId);
+    if (rep && Object.keys(r.animals || {}).length && !Object.keys(rep.found || {}).length) out.add(r.key);
+  }
   return out;
 }
 
@@ -660,14 +678,32 @@ function playerTrip(v, village, t) {
   return Math.hypot(wrap(x - village.x), wrap(y - village.y)) / RaidPlanService.B.UNITS[v.unit].speed;
 }
 
-// Units of v.unit to keep at home for the player raids: per target, n for every raid that is
+// Units of v.unit for the next raid on player target t: PLAYER_SIZE.margin times the biggest loot
+// of the last PLAYER_SIZE.reports reports, in bags, at least PLAYER_SIZE.min, at most t.n. A bag
+// that came back at least PLAYER_SIZE.full full doubles the last army (up to t.n); no report yet:
+// PLAYER_SIZE.first (a test raid). 2026-10-26: raids came back 32% full, the loot each hour the
+// village's production (kurdesz 200 Marksmen for ~7k, 100 carry 10.5k).
+const PLAYER_SIZE = { margin: 1.3, reports: 3, min: 30, full: 0.9, first: 50 };
+function playerArmy(v, t) {
+  const n = Math.min(t.n, PLAYER_SIZE.first);
+  const last = state.playerReports.filter(r => r.key === t.key && r.capacity).slice(-PLAYER_SIZE.reports);
+  if (!last.length) return n;
+  const sent = r => r.sent[v.unit] || 0;
+  const top = last[last.length - 1];
+  if (top.bounty >= PLAYER_SIZE.full * top.capacity) return Math.min(t.n, Math.max(PLAYER_SIZE.min, 2 * sent(top)));
+  const loot = Math.max(...last.map(r => r.bounty));
+  const carry = RaidPlanService.B.UNITS[v.unit].carry;
+  return Math.min(t.n, Math.max(PLAYER_SIZE.min, Math.ceil(PLAYER_SIZE.margin * loot / carry)));
+}
+
+// Units of v.unit to keep at home for the player raids: per target, one army (playerArmy) for every raid that is
 // out at once (a send every everyMinutes over a round trip), less the ones out on those raids now.
 function playerHold(v, village) {
   let hold = 0;
   for (const t of v.targets) {
     if (state.playerStops[t.key]) continue;
     const roundTrip = 2 * playerTrip(v, village, t) * 60;
-    const need = t.n * Math.ceil(roundTrip / v.everyMinutes);
+    const need = playerArmy(v, t) * Math.ceil(roundTrip / v.everyMinutes);
     const out = playerRaids(village.name, t.key)
       .filter(r => r.arrival && 2 * r.arrival * 1000 - r.sentAt > Date.now())
       .reduce((s, r) => s + (r.army[v.unit] || 0), 0);
@@ -676,31 +712,33 @@ function playerHold(v, village) {
   return hold;
 }
 
-// [{ oasis, army, owner }] for a village in mode 'players': n of v.unit to each target whose last
-// raid from here went at least everyMinutes ago, as long as n are at home.
+// [{ oasis, army, owner }] for a village in mode 'players': playerArmy of v.unit to each target whose
+// last raid from here went at least everyMinutes ago, as long as that many are at home.
 function planPlayers(v, village, home) {
   const chosen = [];
   let left = home[v.unit] || 0;
   for (const t of v.targets) {
-    if (state.playerStops[t.key] || left < t.n) continue;
+    const n = playerArmy(v, t);
+    if (state.playerStops[t.key] || left < n) continue;
     const last = playerRaids(village.name, t.key).reduce((m, r) => Math.max(m, r.sentAt || 0), 0);
     if (Date.now() - last < v.everyMinutes * MINUTE) continue;
     const [x, y] = t.key.split('|').map(Number);
-    chosen.push({ oasis: { x, y, stage: null, animals: [] }, army: { [v.unit]: t.n }, owner: t.owner });
-    left -= t.n;
+    chosen.push({ oasis: { x, y, stage: null, animals: [] }, army: { [v.unit]: n }, owner: t.owner });
+    left -= n;
   }
   return chosen;
 }
 
 // What entry v may use of the troops at home: cavOnly raids with the horses alone (infantry has
 // its own entry); /stop_cav keeps all horses at home; /stop2cav, /stop2inf (/stop2 = both) that
-// village's horses or infantry. Made again from the live counts before each entry plans, so it
+// village's horses or infantry on oases and Natars (its player raids go on: the user stopped
+// mansim2's horses on 2026-10-26 to farm players with them). Made again from the live counts before each entry plans, so it
 // sees what the entries before sent.
 function homeOf(v, troops) {
   const vs = (state.villageStops || {})[v.name] || {};
   const home = { ...troops };
   if (v.cavOnly || vs.inf) Object.assign(home, { u61: 0, u62: 0 });
-  if (state.cavStopped || vs.cav) Object.assign(home, { u64: 0, u65: 0, u66: 0 });
+  if (state.cavStopped || (vs.cav && v.mode !== 'players')) Object.assign(home, { u64: 0, u65: 0, u66: 0 });
   return home;
 }
 
@@ -730,7 +768,7 @@ async function round() {
     const home = homeOf(v, homes[v.name]);
     const enough = v.mode === 'empty' ? (home[v.unit] || 0) >= Math.min(...Object.values(v.perStage))
       : v.mode === 'natars' ? (home[v.unit] || 0) >= v.per
-      : v.mode === 'players' ? (home[v.unit] || 0) >= Math.min(...v.targets.map(t => t.n))
+      : v.mode === 'players' ? (home[v.unit] || 0) >= Math.min(...v.targets.map(t => playerArmy(v, t)))
       : home.u61 + home.u62 >= RaidPlanService.INF_MIN || home.u64 + home.u65 + home.u66 >= RaidPlanService.CAV_MIN;
     v.label = v.name + (v.cavOnly ? ' horses' + (v.oasesOf ? ' on ' + v.oasesOf : '') : v.mode === 'natars' ? ' natars ' + v.unit : v.mode === 'players' ? ' players' : ''); // a village may have two natars entries
     log.villages[v.label] = { mode: v.mode, home };
@@ -867,7 +905,7 @@ function playerStatus() {
   return Object.fromEntries(playerTargets().map(t => {
     const reports = state.playerReports.filter(r => r.key === t.key && r.at > since);
     return [t.key, {
-      owner: t.owner, n: t.n,
+      owner: t.owner, n: t.n, next: playerArmy(t.entry, t),
       sent24h: state.raids.filter(r => r.mode === 'players' && r.key === t.key && r.sentAt > since).length,
       reports24h: reports.length,
       loot24h: reports.reduce((s, r) => s + r.bounty, 0),
