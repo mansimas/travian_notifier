@@ -58,8 +58,9 @@ module.exports.travian = {
         { key: '-117|33', n: 50, owner: 'Jerem', village: 'Village de Jerem' },
         { key: '-83|60', n: 200, owner: 'kurdesz', village: 'Osada: kurdesz' },
         { key: '-86|57', n: 100, owner: 'kurdesz', village: 'Nowa osada' },
-        // fixed: always n, not sized by the loot (user, 2026-10-26: 200 every hour).
-        { key: '-117|82', n: 200, fixed: true, owner: 'Kladde', village: 'Thuine' },
+        // fixed: always n, not sized by the loot (user, 2026-10-26: 200 every hour). maxOut: at most
+        // that many out at once and held back for it (6 h round trip would hold 1400).
+        { key: '-117|82', n: 200, fixed: true, maxOut: 700, owner: 'Kladde', village: 'Thuine' },
       ] },
       { name: 'mansim2', mode: 'animals', stages: 8, maxStages: 14 },
       // mansim1's horses go on where mansim2's horses ran out.

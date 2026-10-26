@@ -697,7 +697,14 @@ function playerArmy(v, t) {
   return Math.min(t.n, Math.max(PLAYER_SIZE.min, Math.ceil(PLAYER_SIZE.margin * loot / carry)));
 }
 
-// Units of v.unit to keep at home for the player raids: per target, one army (playerArmy) for every raid that is
+// Units of v.unit out on raids to player target t from village that are not back yet.
+function playerOut(v, village, t) {
+  return playerRaids(village.name, t.key)
+    .filter(r => r.arrival && 2 * r.arrival * 1000 - r.sentAt > Date.now())
+    .reduce((s, r) => s + (r.army[v.unit] || 0), 0);
+}
+
+// Units of v.unit to keep at home for the player raids (at most t.maxOut for a target, out ones counted): per target, one army (playerArmy) for every raid that is
 // out at once (a send every everyMinutes over a round trip), less the ones out on those raids now.
 function playerHold(v, village) {
   let hold = 0;
@@ -705,10 +712,8 @@ function playerHold(v, village) {
     if (state.playerStops[t.key]) continue;
     const roundTrip = 2 * playerTrip(v, village, t) * 60;
     const need = playerArmy(v, t) * Math.ceil(roundTrip / v.everyMinutes);
-    const out = playerRaids(village.name, t.key)
-      .filter(r => r.arrival && 2 * r.arrival * 1000 - r.sentAt > Date.now())
-      .reduce((s, r) => s + (r.army[v.unit] || 0), 0);
-    hold += Math.max(0, need - out);
+    const out = playerOut(v, village, t);
+    hold += Math.max(0, (t.maxOut ? Math.min(need, t.maxOut) : need) - out);
   }
   return hold;
 }
@@ -723,6 +728,7 @@ function planPlayers(v, village, home) {
     if (state.playerStops[t.key] || left < n) continue;
     const last = playerRaids(village.name, t.key).reduce((m, r) => Math.max(m, r.sentAt || 0), 0);
     if (Date.now() - last < v.everyMinutes * MINUTE) continue;
+    if (t.maxOut && playerOut(v, village, t) + n > t.maxOut) continue;
     const [x, y] = t.key.split('|').map(Number);
     chosen.push({ oasis: { x, y, stage: null, animals: [] }, army: { [v.unit]: n }, owner: t.owner });
     left -= n;
